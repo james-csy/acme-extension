@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Simplified for 16 and 32 px: fewer, chunkier links and one motion line -->
+  <rect width="128" height="128" rx="30" fill="#3E9397"/>
+  <path d="M14 94a62 62 0 0 0 28 28" fill="none" stroke="#82C4C8" stroke-width="12" stroke-linecap="round"/>
+  <ellipse cx="25.1" cy="18.19" rx="9.94" ry="10.4" transform="rotate(50.53 25.1 18.19)" fill="none" stroke="#1D1C1A" stroke-width="7.2"/>
+  <rect x="25.67" y="26.16" width="19.24" height="8.8" rx="4.4" transform="rotate(50.53 35.29 30.56)" fill="#1D1C1A"/>
+  <ellipse cx="45.48" cy="42.94" rx="9.94" ry="10.4" transform="rotate(50.53 45.48 42.94)" fill="none" stroke="#1D1C1A" stroke-width="7.2"/>
+  <circle cx="76" cy="80" r="42" fill="#1D1C1A"/>
+</svg>

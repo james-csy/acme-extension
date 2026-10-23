@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Templates · Connect Note</title>
+    <link rel="icon" href="../../icons/icon32.png" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <header class="brand">
+          <h1>Templates</h1>
+          <p class="hint">Connect Note · saved in your Chrome profile</p>
+        </header>
+        <input id="search" type="search" placeholder="Search templates" aria-label="Search templates" />
+        <div id="groups"></div>
+        <div class="sidebar-actions">
+          <button id="export" type="button">Export</button>
+          <label class="button" for="import-file">Import</label>
+          <input id="import-file" type="file" accept="application/json,.json" hidden />
+        </div>
+        <p id="library-status" class="status" role="status"></p>
+      </aside>
+
+      <main class="editor">
+        <section id="empty" class="empty" hidden>
+          <h1>Create your first template</h1>
+          <p>Connection notes and InMails fill in automatically from their default template. Messages are picked from a panel on LinkedIn messaging.</p>
+          <div class="empty-actions">
+            <button type="button" class="primary" data-new="connection_note">New connection note</button>
+            <button type="button" data-new="inmail">New InMail</button>
+            <button type="button" data-new="message">New message</button>
+          </div>
+        </section>
+
+        <form id="form" hidden novalidate>
+          <div class="field">
+            <label for="title">Title</label>
+            <input id="title" type="text" placeholder="Thanks for connecting" />
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="type">Type</label>
+              <select id="type"></select>
+            </div>
+            <div class="field" id="default-field">
+              <span class="label">Auto-fill</span>
+              <label class="toggle"><input id="is-default" type="checkbox" /> <span id="default-label">Use as default</span></label>
+              <p class="hint" id="default-hint"></p>
+            </div>
+            <div class="field" id="usage-field">
+              <span class="label">How it's used</span>
+              <p class="hint">Pick it from the template panel on LinkedIn messaging. It's inserted at your cursor.</p>
+            </div>
+          </div>
+
+          <div class="field" id="subject-field">
+            <label for="subject">Subject</label>
+            <input id="subject" type="text" placeholder="Quick question, {name}" />
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="body">Message</label>
+              <span id="count" class="count"></span>
+            </div>
+            <textarea id="body" rows="8" placeholder="Hi {name}, I'd love to connect."></textarea>
+            <div id="variables-section">
+              <div class="variables">
+                <span class="hint">Variables:</span>
+                <span id="variable-chips" class="variables"></span>
+              </div>
+              <p class="hint">Add <code>:lower</code>, <code>:upper</code> or <code>:title</code> to change casing, e.g. <code>{name:upper}</code>. Add <code>|text</code> to say what to use when LinkedIn doesn't show it, e.g. <code>{company|your team}</code>.</p>
+            </div>
+          </div>
+
+          <div class="preview">
+            <span class="hint">Preview</span>
+            <p id="preview-subject" class="preview-subject"></p>
+            <p id="preview-body"></p>
+          </div>
+
+          <p id="warning" class="error" role="status"></p>
+          <p id="error" class="error" role="alert"></p>
+
+          <div class="actions">
+            <button id="save" type="submit" class="primary" title="Save (⌘S / Ctrl+S)">Save</button>
+            <button id="duplicate" type="button">Duplicate</button>
+            <button id="delete" type="button" class="danger">Delete</button>
+            <span id="status" class="status" role="status"></span>
+            <span id="dirty" class="dirty" hidden>Unsaved changes</span>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <script src="../core/namespace.js"></script>
+    <script src="../core/types.js"></script>
+    <script src="../core/template.js"></script>
+    <script src="../core/storage.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

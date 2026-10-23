@@ -1,0 +1,44 @@
+<!doctype html>
+<!--
+  Opens an extension screen with sample data and a stand-in for Chrome's extension APIs, for
+  design review. Serve the project folder, then e.g.:
+    /tests/preview.html?screen=options          template editor with sample templates
+    /tests/preview.html?screen=options&empty    template editor, no templates yet
+    /tests/preview.html?screen=popup            toolbar popup
+-->
+<meta charset="utf-8" />
+<script>
+  (async () => {
+    const params = new URLSearchParams(location.search);
+    const screen = params.get('screen') || 'options';
+    const sample = {
+      'tpl:n1': { id: 'n1', title: 'Connection note', type: 'connection_note', body: 'Hey {name}, I came across your profile and would love to connect.', updatedAt: 1 },
+      'tpl:n2': { id: 'n2', title: 'Event follow-up', type: 'connection_note', body: 'Great meeting you at the event, {name}!', updatedAt: 1 },
+      'tpl:b1': { id: 'b1', title: 'Cold InMail v2', type: 'inmail', subject: 'Quick question, {name}', body: 'Hi {name},\n\nRoadrunner is AI-native CPQ...', updatedAt: 1 },
+      'tpl:c1': { id: 'c1', title: '2nd touch', type: 'message', body: "Curious if you'd be open to checking out Roadrunner.", updatedAt: 1 },
+      'tpl:c2': { id: 'c2', title: 'Thanks for connecting', type: 'message', body: 'Thanks for connecting! Having led revenue teams for years, I know how painful quoting gets.', updatedAt: 1 },
+      settings: { defaults: { connection_note: 'n1', inmail: 'b1' }, autoFill: true },
+    };
+    const seed = params.has('empty') ? {} : sample;
+    const stub = `<script>
+      const store = { sync: ${JSON.stringify(seed)}, local: {} };
+      const area = (n) => ({
+        get: async (k) => structuredClone(k === null ? store[n] : Object.fromEntries([].concat(k).filter((x) => x in store[n]).map((x) => [x, store[n][x]]))),
+        set: async (o) => Object.assign(store[n], structuredClone(o)),
+        remove: async (k) => [].concat(k).forEach((x) => delete store[n][x]),
+      });
+      window.chrome = {
+        storage: { sync: area('sync'), local: area('local'), onChanged: { addListener() {} } },
+        runtime: { openOptionsPage() {}, sendMessage() {} },
+        tabs: { query: async () => [{ id: 1 }], sendMessage: async () => ({ ok: true, file: 'linkedin-capture-messaging.html' }) },
+      };
+    <\/script>`;
+    const base = `/src/${screen}/`;
+    const html = await (await fetch(`${base}${screen}.html`, { cache: 'no-store' })).text();
+    // Load the screen's scripts and styles fresh, never from cache
+    const fresh = html.replace(/((?:src|href)="[^"]+\.(?:js|css))"/g, `$1?${Date.now()}"`);
+    document.open();
+    document.write(fresh.replace('<head>', `<head><base href="${base}">${stub}`));
+    document.close();
+  })();
+</script>

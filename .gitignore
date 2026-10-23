@@ -1,0 +1,5 @@
+# Saved LinkedIn pages (real people's profiles and messages) and their expected values: kept local
+fixtures/
+# Packaged builds
+*.zip
+.DS_Store

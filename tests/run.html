@@ -1,0 +1,490 @@
+<!doctype html>
+<!--
+  Test page for the extension. Serve the project folder and open this page:
+    python3 -m http.server 8771   (from the linkedin-connect-note folder)
+    http://127.0.0.1:8771/tests/run.html
+  Results appear on the page; window.results holds them for automation.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Connect Note tests</title>
+    <style>
+      body { font: 13px/1.5 ui-monospace, monospace; margin: 16px; }
+      .pass { color: #057642; }
+      .fail { color: #c00; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <!-- Stand-in for a profile page's name heading -->
+    <div componentkey="ProfileVerificationTriggerRef-dana-brooks"><h2>Dana Brooks</h2></div>
+    <a id="connect-button" aria-label="Invite Kim Tran to connect" href="#"><span>Connect</span></a>
+    <div id="interop-outlet"></div>
+    <svg width="0" height="0"><path d="M0 0" /></svg>
+    <div id="host"></div>
+    <pre id="out"></pre>
+
+    <script>
+      // Stub of the parts of the extension API the scripts use
+      const store = { sync: {}, local: {} };
+      // Like Chrome, tell onChanged listeners after every write
+      const changeListeners = [];
+      const notify = (name, keys) =>
+        setTimeout(() => changeListeners.forEach((fn) => fn(Object.fromEntries(keys.map((k) => [k, {}])), name)));
+      const area = (name) => ({
+        get: async (keys) => {
+          if (keys === null) return structuredClone(store[name]);
+          const list = Array.isArray(keys) ? keys : [keys];
+          return structuredClone(Object.fromEntries(list.filter((k) => k in store[name]).map((k) => [k, store[name][k]])));
+        },
+        set: async (items) => {
+          Object.assign(store[name], structuredClone(items));
+          notify(name, Object.keys(items));
+        },
+        remove: async (keys) => {
+          [].concat(keys).forEach((k) => delete store[name][k]);
+          notify(name, [].concat(keys));
+        },
+      });
+      let closedRoot = null; // set when a test creates a closed shadow root
+      const messageListeners = [];
+      window.chrome = {
+        storage: { sync: area('sync'), local: area('local'), onChanged: { addListener: (fn) => changeListeners.push(fn) } },
+        dom: {
+          // Like Chrome, only HTML elements are accepted (LinkedIn pages are full of SVG icons)
+          openOrClosedShadowRoot: (el) => {
+            if (!(el instanceof HTMLElement)) throw new TypeError('Error in invocation of dom.openOrClosedShadowRoot(HTMLElement element)');
+            return el.id === 'interop-outlet' ? closedRoot : null;
+          },
+        },
+        runtime: { id: "test", onMessage: { addListener: (fn) => messageListeners.push(fn) }, sendMessage() {} },
+      };
+    </script>
+    <script src="../src/core/namespace.js"></script>
+    <script src="../src/core/types.js"></script>
+    <script src="../src/core/template.js"></script>
+    <script src="../src/core/names.js"></script>
+    <script src="../src/core/people.js"></script>
+    <script src="../src/core/fill.js"></script>
+    <script src="../src/core/storage.js"></script>
+    <script src="../src/core/focus.js"></script>
+    <script src="../src/core/watch.js"></script>
+    <script src="../src/core/capture.js"></script>
+    <script src="../src/panel/panel.js"></script>
+    <script src="../src/adapters/connect-note.js"></script>
+    <script src="../src/adapters/messaging.js"></script>
+    <script src="../src/adapters/sales-nav.js"></script>
+
+    <script type="module">
+      import { Editor } from 'https://esm.sh/@tiptap/core@2.11.5';
+      import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2.11.5';
+
+      const results = [];
+      const expect = (name, actual, expected) => {
+        const pass = JSON.stringify(actual) === JSON.stringify(expected);
+        results.push({ name, pass, actual, expected });
+      };
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const adapter = CN.adapters.find((a) => a.id === 'connect-note');
+      const parse = async (file) => new DOMParser().parseFromString(await (await fetch(file)).text(), 'text/html');
+
+      // --- Templates ---------------------------------------------------------
+      const t = 'Hi {name} / {name:lower} / {NAME:UPPER} / {name:title} / {other}';
+      expect('template: casings', CN.fillTemplate(t, { name: 'jean-luc' }), 'Hi jean-luc / jean-luc / JEAN-LUC / Jean-Luc / {other}');
+      expect('template: fallback keeps casing', CN.fillTemplate('{name:upper}', { name: null }), 'THERE');
+      expect('template: variables ignore case', CN.fillTemplate('{fullname} {FullName}', { fullName: 'Jo Lee' }), 'Jo Lee Jo Lee');
+      expect('variables: offered per type', Object.values(CN.TEMPLATE_TYPES).map((t) => t.variables.map((v) => v.key)),
+        [['name', 'fullName', 'company', 'title'], ['name', 'fullName', 'company', 'title'], ['name', 'fullName', 'company', 'title']]);
+      expect('variables: unsupported ones found, casing ignored',
+        CN.unsupportedVariables('connection_note', 'Hi {Name:upper} at {team}', '{school|x} {company|x} {FULLNAME}'), ['team', 'school']);
+      expect('template: fallback when missing, value when found, casing on both',
+        [CN.fillTemplate('{company|your team} / {Company:upper|us}', { company: null }), CN.fillTemplate('{company|your team} / {company:upper|us}', { company: 'Acme' })],
+        ['your team / US', 'Acme / ACME']);
+      expect('template: own fallback beats the default one', CN.fillTemplate('Hi {name|friend}', { name: null }), 'Hi friend');
+      expect('variables: company and title need a fallback',
+        CN.missingFallbacks('inmail', 'At {company}', '{title|your role} {COMPANY} {name}').map((v) => v.key), ['company']);
+      expect('variables: messages fill company too', CN.fillForType('message', 'At {company|x}', { company: 'Acme' }), 'At Acme');
+      expect('variables: none unsupported', CN.unsupportedVariables('inmail', 'Hey {name}, from {fullName}'), []);
+      expect('variables: messages fill the name', [CN.unsupportedVariables('message', 'Hey {name} {team}'), CN.fillForType('message', 'Hey {name}', { name: 'Jo' })], [['team'], 'Hey Jo']);
+      expect('variables: fillForType fills supported ones', CN.fillForType('connection_note', 'Hi {name:upper} {team}', { name: 'Jo', team: 'X' }), 'Hi JO {team}');
+      expect('names: first name', ['Dr. Jane Smith', 'DANA BROOKS', '🚀 Maria Ruiz'].map(CN.firstNameOf), ['Jane', 'Dana', 'Maria']);
+
+      // --- Library: migration -------------------------------------------------
+      store.sync = { noteTemplate: 'old v0.4 note' };
+      let list = await CN.listTemplates();
+      expect('migrate v0.4: becomes a titled template', list.map(({ id, title, type, body }) => ({ id, title, type, body })),
+        [{ id: 'tpl_connection_note', title: 'Connection note', type: 'connection_note', body: 'old v0.4 note' }]);
+      expect('migrate v0.4: set as default, old key gone', [(await CN.getSettings()).defaults, 'noteTemplate' in store.sync],
+        [{ connection_note: 'tpl_connection_note' }, false]);
+
+      store.sync = { templates: { 'connect-note': { body: 'Hi {name}, would love to connect!' } } };
+      expect('migrate v0.5: body carried over', (await CN.defaultTemplate('connection_note'))?.body, 'Hi {name}, would love to connect!');
+      expect('migrate: runs once', (await CN.listTemplates()).length, 1);
+
+      // --- Library: defaults, delete, export/import --------------------------
+      const followUp = await CN.saveTemplate({ title: 'Event follow-up', type: 'connection_note', body: 'Great meeting you, {name}!' });
+      const inmail = await CN.saveTemplate({ title: 'Cold InMail', type: 'inmail', subject: 'Quick question, {name}', body: 'Hi {name}…' });
+      expect('library: sorted by title', (await CN.listTemplates()).map((x) => x.title), ['Cold InMail', 'Connection note', 'Event follow-up']);
+      expect('library: no InMail default until chosen', await CN.defaultTemplate('inmail'), null);
+      await CN.saveSettings({ defaults: { ...(await CN.getSettings()).defaults, inmail: inmail.id } });
+      expect('library: InMail default', (await CN.defaultTemplate('inmail'))?.title, 'Cold InMail');
+      await CN.deleteTemplate(inmail.id);
+      expect('library: delete clears its default', (await CN.getSettings()).defaults, { connection_note: 'tpl_connection_note' });
+
+      // Two quick settings changes (popup default + auto-fill switch) both survive
+      await Promise.all([
+        CN.saveSettings(({ defaults }) => ({ defaults: { ...defaults, inmail: 'x' } })),
+        CN.saveSettings({ autoFill: false }),
+      ]);
+      const quick = await CN.getSettings();
+      expect('settings: concurrent saves both kept', [quick.defaults.inmail, quick.autoFill], ['x', false]);
+      await CN.saveSettings(({ defaults }) => {
+        delete defaults.inmail;
+        return { defaults, autoFill: true };
+      });
+
+      const exported = await CN.exportLibrary();
+      expect('export: has templates and defaults', [exported.templates.length, exported.defaults], [2, { connection_note: 'tpl_connection_note' }]);
+      expect('import: identical templates skipped', await CN.importLibrary(exported), { added: 0, skipped: 2 });
+      store.sync = {};
+      expect('import: into empty library', await CN.importLibrary(exported), { added: 2, skipped: 0 });
+      const imported = await CN.listTemplates();
+      expect('import: default carried over', (await CN.defaultTemplate('connection_note'))?.title, 'Connection note');
+      let importError = '';
+      try { await CN.importLibrary({ hello: 1 }); } catch (e) { importError = e.message; }
+      expect('import: rejects other files', importError, "That file isn't a template export.");
+      await CN.saveSettings({ defaults: { connection_note: imported.find((x) => x.title === 'Connection note').id } });
+      await CN.deleteTemplate(imported.find((x) => x.title === 'Event follow-up').id);
+
+      // --- Profile Experience: single roles, ended roles ------------------------
+      const experience = (entries) => {
+        const doc = document.implementation.createHTMLDocument('Ana Diaz | LinkedIn');
+        doc.body.innerHTML = `<div componentkey="ProfileVerificationTriggerRef-ana"><h2>Ana Diaz</h2></div>
+          <section componentkey="profileCardsExperienceOnlyana">${entries}</section>`;
+        return doc;
+      };
+      store.local = {};
+      const single = experience(`<div componentkey="entity-collection-item-1"><p>Head of Sales</p><p>Basecamp · Full-time</p>
+        <p>Feb 2018 - Present · 1 yr</p></div>`);
+      expect('profile: single-role entry, employment type dropped', [(await adapter.getContext(single)).company, (await adapter.getContext(single)).title],
+        ['Basecamp', 'Head of Sales']);
+      const ended = experience(`<div componentkey="entity-collection-item-1"><p>Head of Sales</p><p>Basecamp</p><p>Feb 2018 - Jan 2019 · 1 yr</p></div>`);
+      expect('profile: no current role, no company', (await adapter.getContext(ended)).company, null);
+
+      // --- Fixtures: saved LinkedIn pages --------------------------------------
+      // fixtures/ holds real people's pages, so it's kept out of git (see .gitignore), along with
+      // fixtures/expected.json: what each page should give. Without them these checks are skipped.
+      const expected = await fetch('../fixtures/expected.json').then((r) => (r.ok ? r.json() : null), () => null);
+      if (!expected) {
+        results.push({ name: 'fixtures -- SKIPPED, fixtures/ is not in this copy (it holds real LinkedIn pages)', pass: true });
+      } else {
+        const { profile: P, lead: L } = expected;
+        const profile = await parse('../fixtures/connect-note-profile.html');
+        const box = adapter.fields[0].selectors.map((s) => profile.querySelector(s)).find(Boolean);
+        expect('fixture: finds the note box', box?.getAttribute('role'), 'textbox');
+        expect('fixture: profile name', CN.profileName(profile), P.fullName);
+        store.local = {};
+        expect('fixture: profile company and title, from the current Experience role', await adapter.getContext(profile),
+          { name: P.firstName, fullName: P.fullName, company: P.company, title: P.title });
+        await CN.rememberName('Kim Tran');
+        expect('profile: note for someone else (sidebar Connect) gets no company', (await adapter.getContext(profile)).company, null);
+        store.local = {};
+        expect('profile: remembered with its id and address', adapter.personOnPage(profile, `/in/${P.address}/`),
+          { ids: [P.id, P.address], fullName: P.fullName, title: P.title, company: P.company });
+        expect('profile: nothing remembered while the page still shows someone else', adapter.personOnPage(profile, '/in/kim-tran/'), null);
+
+        const snConnect = await parse('../fixtures/salesnav-connect.html');
+        expect('fixture (Sales Nav connect): box and name', [
+          snConnect.querySelector('textarea#connect-cta-form__invitation')?.getAttribute('maxlength'),
+          snConnect.querySelector('[aria-labelledby="connect-cta-form__header"] [data-anonymize="person-name"]')?.textContent.trim(),
+        ], ['300', L.fullName]);
+        const snInmail = await parse('../fixtures/salesnav-inmail.html');
+        expect('fixture (Sales Nav InMail): subject, body and name', [
+          Boolean(snInmail.querySelector('input[aria-label="Subject (required)"]')),
+          Boolean(snInmail.querySelector('textarea[name="message"]')),
+          snInmail.querySelector('[aria-label^="Conversation with "]')?.getAttribute('aria-label'),
+        ], [true, true, `Conversation with ${L.fullName}`]);
+        const snAdapter = (id) => CN.adapters.find((a) => a.id === id);
+        const firstBox = (id, doc) => snAdapter(id).fields[0].selectors.map((sel) => doc.querySelector(sel)).find(Boolean);
+        const lead = { name: L.firstName, fullName: L.fullName, company: L.company, title: L.title };
+        expect('Sales Nav connect: name, company and title of the open lead', await snAdapter('sn-connect').getContext(snConnect, firstBox('sn-connect', snConnect)), lead);
+        expect('Sales Nav InMail: name, company and title of the open lead', await snAdapter('sn-inmail').getContext(snInmail, firstBox('sn-inmail', snInmail)), lead);
+        expect('Sales Nav InMail: message box found in the same dialog',
+          snAdapter('sn-inmail').fields[1].selectors.map((sel) => firstBox('sn-inmail', snInmail).closest('[role="dialog"]').querySelector(sel)).find(Boolean)?.tagName, 'TEXTAREA');
+        expect('Sales Nav: lead remembered by name', snAdapter('sn-connect').personOnPage(snInmail, '/sales/lead/ACwAA123,NAME_SEARCH'),
+          { ids: [], fullName: L.fullName, title: L.title, company: L.company });
+        snInmail.querySelector('h1[data-anonymize="person-name"]').textContent = 'Someone Else';
+        expect('Sales Nav: dialog for another person gets no company', (await snAdapter('sn-inmail').getContext(snInmail, firstBox('sn-inmail', snInmail))).company, null);
+      }
+
+      // --- End to end, with the watcher running -------------------------------
+      CN.start();
+
+      // 1. New dialog: TipTap editor in the main page
+      const host = document.getElementById('host');
+      host.innerHTML = `<div data-sdui-screen="com.linkedin.sdui.flagshipnav.mynetwork.invitations.CustomInviteCompose">
+        <div id="ed"></div><button id="send" disabled>Send</button></div>`;
+      const editor = new Editor({
+        element: document.getElementById('ed'),
+        extensions: [StarterKit],
+        editorProps: { attributes: { role: 'textbox' } },
+        onUpdate: ({ editor }) => (document.getElementById('send').disabled = !editor.getText()),
+      });
+      await wait(900);
+      expect('e2e: rich editor filled from default', editor.getText(), 'Hi Dana, would love to connect!');
+      expect('e2e: Send enabled', document.getElementById('send').disabled, false);
+      host.innerHTML = '';
+
+      // Blank lines between paragraphs survive in a rich editor, as they do in a textarea
+      host.innerHTML = '<div id="ed"></div>';
+      const spaced = new Editor({ element: document.getElementById('ed'), extensions: [StarterKit] });
+      CN.fillBox(spaced.view.dom, 'Hey Jo,\n\nI\'m at <Roadrunner> & co.\nThanks');
+      expect('fill: rich editor keeps blank lines', spaced.getHTML(), '<p>Hey Jo,</p><p></p><p>I\'m at &lt;Roadrunner&gt; &amp; co.</p><p>Thanks</p>');
+      spaced.commands.setContent('<p>Before</p>');
+      spaced.commands.focus('end');
+      CN.insertText(spaced.view.dom, 'one\n\ntwo');
+      expect('insert: rich editor keeps blank lines', spaced.getHTML(), '<p>Beforeone</p><p></p><p>two</p>');
+      spaced.destroy();
+      host.innerHTML = '';
+
+      // 2. Older dialog: textarea inside a closed shadow root created after page load
+      const outlet = document.getElementById('interop-outlet');
+      closedRoot = outlet.attachShadow({ mode: 'closed' });
+      const openDialog = (inner = '<textarea id="custom-message"></textarea>') => {
+        closedRoot.innerHTML = `<div role="dialog">${inner}</div>`;
+        return closedRoot.querySelector('textarea');
+      };
+      let ta = openDialog();
+      await wait(900);
+      expect('e2e: closed shadow textarea filled', ta.value, 'Hi Dana, would love to connect!');
+
+      // 3. Connect clicked for someone else, then the dialog opens
+      document.getElementById('connect-button').click();
+      await wait(50);
+      ta = openDialog();
+      await wait(900);
+      expect('e2e: name from Connect button', ta.value, 'Hi Kim, would love to connect!');
+      store.local = {};
+
+      // 3b. LinkedIn redraws the box right after it's filled and drops the text: filled again
+      ta = openDialog();
+      await wait(300);
+      const firstFill = ta.value;
+      ta.value = '';
+      await wait(1200);
+      expect('e2e: text the page cleared is put back', [firstFill, ta.value], ['Hi Dana, would love to connect!', 'Hi Dana, would love to connect!']);
+
+      // 3c. The same box reused for the next invitation: closed (hidden), emptied, shown again
+      // (Waits allow for a background tab, where Chrome runs timers at most once a second)
+      closedRoot.querySelector('[role="dialog"]').style.display = 'none';
+      await wait(1500);
+      ta.value = '';
+      closedRoot.querySelector('[role="dialog"]').style.display = '';
+      await wait(2500);
+      expect('e2e: reused box filled again when the dialog reopens', ta.value, 'Hi Dana, would love to connect!');
+
+      // 4. Text the user already typed is left alone
+      ta = openDialog('<textarea id="custom-message">my own words</textarea>');
+      await wait(900);
+      expect('e2e: typed text untouched', ta.value, 'my own words');
+
+      // 5. Auto-fill switched off in the popup
+      await CN.saveSettings({ autoFill: false });
+      ta = openDialog();
+      await wait(900);
+      expect('e2e: nothing filled when auto-fill is off', ta.value, '');
+      await CN.saveSettings({ autoFill: true });
+
+      // 6. No default chosen for the type
+      const { defaults } = await CN.getSettings();
+      await CN.saveSettings({ defaults: {} });
+      ta = openDialog();
+      await wait(900);
+      expect('e2e: nothing filled without a default', ta.value, '');
+      await CN.saveSettings({ defaults });
+
+      // 7. Sales Navigator: the regular note box rules don't apply there, and a message box with no
+      // subject (a message to a connection, not an InMail) is left alone
+      history.pushState({}, '', '/sales/lead/123');
+      ta = openDialog('<textarea name="message"></textarea>');
+      await wait(900);
+      expect('e2e: skipped on Sales Navigator', ta.value, '');
+      closedRoot.innerHTML = '';
+
+      // 8. Sales Navigator InMail on a lead's page: subject and message, with company and title
+      const coldInmail = await CN.saveTemplate({ title: 'Cold', type: 'inmail', subject: 'Quoting at {company|your team}', body: 'Hi {name}, as {title|a leader}…' });
+      await CN.saveSettings(({ defaults }) => ({ defaults: { ...defaults, inmail: coldInmail.id } }));
+      host.innerHTML = `<h1 data-anonymize="person-name">Ana Diaz</h1>
+        <div data-sn-view-name="lead-current-role"><p><span data-anonymize="job-title">VP Sales</span> at
+          <a data-anonymize="company-name" href="#">Acme</a></p></div>
+        <section role="dialog" aria-label="Conversation with Ana Diaz">
+          <input id="compose-form-subject-ember1"><textarea id="compose-form-text-ember1" name="message"></textarea></section>`;
+      await wait(900);
+      expect('e2e: Sales Nav InMail filled', [host.querySelector('input').value, host.querySelector('textarea').value],
+        ['Quoting at Acme', 'Hi Ana, as VP Sales…']);
+      host.innerHTML = '';
+      await CN.deleteTemplate(coldInmail.id);
+      history.back();
+      await wait(100);
+
+      // --- Capture: includes the closed shadow root ---------------------------
+      closedRoot.innerHTML = '<div role="dialog"><textarea id="custom-message">captured me</textarea></div>';
+      let downloaded = null;
+      const realClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () {
+        downloaded = fetch(this.href).then((r) => r.text());
+      };
+      const reply = await new Promise((resolve) => messageListeners[0]({ type: 'capture-page' }, {}, resolve));
+      HTMLAnchorElement.prototype.click = realClick;
+      const capturedHtml = await downloaded;
+      expect('capture: replies with a file name', reply.ok && reply.file.startsWith('linkedin-capture'), true);
+      expect('capture: closed shadow root included', /<template shadowrootmode="closed">[\s\S]*captured me/.test(capturedHtml), true);
+
+      // --- Messaging panel ----------------------------------------------------
+      await CN.saveTemplate({ title: '2nd touch', type: 'message', body: "Curious if you'd be open to a chat." });
+      await CN.saveTemplate({ title: 'Thanks for connecting', type: 'message', body: 'Thanks for connecting!' });
+      const panelHost = () => document.querySelector('connect-note-panel');
+      const panelItems = () => [...CN.panel.root.querySelectorAll('.item')];
+      const clickItem = (title) => {
+        const item = panelItems().find((i) => i.textContent.includes(title));
+        // A real click: mousedown first (the panel cancels it so focus stays in the box), then click
+        const keptFocus = item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        item.click();
+        return keptFocus;
+      };
+
+      expect('panel: hidden off messaging pages', panelHost(), null);
+      history.pushState({}, '', '/messaging/thread/abc/');
+      await wait(900);
+      expect('panel: shown on messaging pages', Boolean(panelHost()), true);
+      expect('panel: lists message templates only, by title', panelItems().map((i) => i.querySelector('.title').textContent),
+        ['2nd touch', 'Thanks for connecting']);
+      const oldStyle = await CN.saveTemplate({ title: 'Old {team} one', type: 'message', body: 'Hi {name}, how is it on {team}?' });
+      await wait(900);
+      expect('panel: flags variables it can’t fill', panelItems().find((i) => i.textContent.includes('Old'))?.querySelector('.warn')?.textContent,
+        "{team} won't be filled in");
+      await CN.deleteTemplate(oldStyle.id);
+
+      // Message box inside LinkedIn's closed shadow root, with the conversation header nearby
+      closedRoot.innerHTML = `<section>
+        <header><a href="#" aria-label="View Jordan Ellis’s profile">Jordan Ellis</a></header>
+        <div><a href="#" aria-label="View Lee Park’s profile"></a>An earlier message</div>
+        <textarea aria-label="Write a message…">Hello there. </textarea>
+      </section>`;
+      const messageBox = closedRoot.querySelector('textarea');
+      await wait(600); // let the watcher attach its focus listener inside the shadow root
+      messageBox.focus();
+      messageBox.setSelectionRange(messageBox.value.length, messageBox.value.length);
+      await wait(1200);
+      expect('panel: shows who the message is for', CN.panel.root.querySelector('.to').textContent, 'To: Jordan Ellis');
+      expect('names: recipient found near the box, own name skipped later', CN.nameNear(messageBox), 'Jordan Ellis');
+      // Classic messaging page (captured Oct 2026): header link titled "Open <Name>'s profile",
+      // sent messages only say "View <first name>'s profile" in hidden text
+      const classic = document.createElement('div');
+      classic.innerHTML = `<div class="msg-convo-wrapper">
+        <div class="msg-title-bar"><a class="msg-thread__link-to-profile" title="Open Sam Rivera’s profile" href="#">
+          <h2 class="msg-entity-lockup__entity-title">Sam Rivera</h2></a></div>
+        <ul><li><a href="#"><span class="a11y-text">View Chris’ profile</span></a>
+          <span class="msg-s-message-group__name">Chris Doe</span><p>anytime!</p></li></ul>
+        <form><div class="msg-form__contenteditable" contenteditable="true" aria-label="Write a message…"></div></form>
+      </div>`;
+      expect('names: classic messaging header', CN.nameNear(classic.querySelector('[contenteditable]')), 'Sam Rivera');
+      // Company remembered from their profile page, found again from the header's profile link
+      classic.querySelector('.msg-thread__link-to-profile').href = 'https://www.linkedin.com/in/ACoAAtest123/';
+      await CN.rememberPerson({ ids: ['ACoAAtest123', 'sam-r'], fullName: 'S. Rivera', company: 'Initech', title: 'CTO' });
+      const messaging = CN.adapters.find((a) => a.id === 'li-message');
+      const fromProfile = await messaging.getContext(classic.querySelector('[contenteditable]'));
+      expect('messaging: company and title remembered from their profile, matched by profile id',
+        [fromProfile.company, fromProfile.title], ['Initech', 'CTO']);
+      classic.querySelector('.msg-thread__link-to-profile').href = 'https://www.linkedin.com/in/ACoAAother/';
+      expect('messaging: nobody remembered, no company', (await messaging.getContext(classic.querySelector('[contenteditable]'))).company, null);
+      const bubble = document.createElement('div');
+      bubble.innerHTML = `<header><h2 class="msg-overlay-bubble-header__title"> Priya  Raman </h2></header>
+        <form><div contenteditable="true"></div></form>`;
+      expect('names: pop-up chat window header', CN.nameNear(bubble.querySelector('[contenteditable]')), 'Priya Raman');
+      const cancelled = !clickItem('2nd touch');
+      await wait(200);
+      expect('panel: click keeps focus in the message box', cancelled, true);
+      expect('panel: inserts at cursor, keeps existing text', messageBox.value, "Hello there. Curious if you'd be open to a chat.");
+      const named = await CN.saveTemplate({ title: 'Named hello', type: 'message', body: ' Hi {name} ({fullName})' });
+      await wait(900);
+      messageBox.focus();
+      messageBox.setSelectionRange(messageBox.value.length, messageBox.value.length);
+      clickItem('Named hello');
+      await wait(300);
+      expect('panel: fills in the recipient name', messageBox.value.endsWith(' Hi Jordan (Jordan Ellis)'), true);
+      await CN.deleteTemplate(named.id);
+
+      // Company: not known for Jordan yet, typed into the panel, used, and remembered
+      const companyInput = CN.panel.root.querySelector('.company input');
+      expect('panel: company field shown, empty when not known', [companyInput.closest('label').hidden, companyInput.value], [false, '']);
+      const atCompany = await CN.saveTemplate({ title: 'At company', type: 'message', body: ' How is {company|your team}?' });
+      await wait(900);
+      companyInput.value = 'Acme';
+      companyInput.dispatchEvent(new Event('input', { bubbles: true }));
+      expect('panel: preview uses the typed company', panelItems().find((i) => i.textContent.includes('At company'))?.querySelector('.preview').textContent,
+        ' How is Acme?');
+      messageBox.focus();
+      messageBox.setSelectionRange(messageBox.value.length, messageBox.value.length);
+      clickItem('At company');
+      await wait(300);
+      expect('panel: inserts the typed company', messageBox.value.endsWith(' How is Acme?'), true);
+      expect('people: typed company remembered for the conversation and the name',
+        [(await CN.recallPerson({ ids: ['thread:abc'] }))?.company, (await CN.recallPerson({ fullName: 'Jordan Ellis' }))?.company], ['Acme', 'Acme']);
+      await CN.deleteTemplate(atCompany.id);
+      await wait(900);
+
+      // New message page: the person typed a name in the "To" box, then clicked a template.
+      // It must go into the message box, never the recipient search.
+      closedRoot.innerHTML = `<section>
+        <input type="text" role="combobox" aria-autocomplete="list" aria-label="Type a name or multiple names">
+        <div contenteditable="true" aria-label="Write a message…"></div>
+      </section>`;
+      const recipientBox = closedRoot.querySelector('input');
+      await wait(600);
+      recipientBox.focus();
+      recipientBox.value = 'Lee';
+      recipientBox.dispatchEvent(new Event('input', { bubbles: true }));
+      await wait(1200);
+      clickItem('Thanks for connecting');
+      await wait(200);
+      expect('panel: never inserts into the recipient box', [recipientBox.value, closedRoot.querySelector('[contenteditable]').textContent],
+        ['Lee', 'Thanks for connecting!']);
+
+      // Rich-text message box in the main page; cursor in the middle of existing text
+      host.innerHTML = `<div><a href="#" aria-label="View Kim Tran's profile">Kim Tran</a><div id="msg"></div></div>`;
+      const messageEditor = new Editor({
+        element: document.getElementById('msg'),
+        extensions: [StarterKit],
+        content: '<p>Start  end</p>',
+        editorProps: { attributes: { role: 'textbox', 'aria-label': 'Write a message…' } },
+      });
+      // A window without focus (e.g. a background tab) can't put the cursor in an editor, so
+      // this check only runs when the test page is the focused window
+      if (document.hasFocus()) {
+        closedRoot.innerHTML = '';
+        messageEditor.commands.focus();
+        messageEditor.commands.setTextSelection(7); // between the two spaces
+        await wait(1200);
+        clickItem('Thanks for connecting');
+        await wait(200);
+        expect('panel: rich editor insert at cursor', messageEditor.getText(), 'Start Thanks for connecting! end');
+      } else {
+        results.push({ name: 'panel: rich editor insert at cursor -- SKIPPED, click into this window and reload', pass: true });
+      }
+
+      history.pushState({}, '', '/feed/');
+      await wait(900);
+      expect('panel: removed when leaving messaging', panelHost(), null);
+      history.back();
+      await wait(100);
+
+      // --- Report -------------------------------------------------------------
+      window.results = results;
+      document.getElementById('out').innerHTML = results
+        .map((r) => `<span class="${r.pass ? 'pass' : 'fail'}">${r.pass ? 'PASS' : 'FAIL'}</span> ${r.name}` +
+          (r.pass ? '' : `\n     expected ${JSON.stringify(r.expected)}\n     got      ${JSON.stringify(r.actual)}`))
+        .join('\n');
+    </script>
+  </body>
+</html>
