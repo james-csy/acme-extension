@@ -1,18 +1,22 @@
-// The template panel: docked on the right on pages with a pick-from-list box (LinkedIn messaging).
-// Clicking a template inserts it at the cursor in the message box you last typed in.
+// The template panel, on pages with a pick-from-list box (LinkedIn messaging). It sits beside the
+// message box it inserts into and follows it; dragged somewhere else, it stays there until it's
+// put back. Clicking a template inserts it at the cursor in the message box you last typed in.
 // It lives in a closed shadow root so LinkedIn's styles and ours can't affect each other.
 (() => {
   if (window !== window.top) return; // one panel per tab, in the main page
 
   const STATE_KEY = 'panelState';
   const CONTEXT_REFRESH_MS = 1000;
+  const GAP = 12; // between the panel and the message box
+  const MARGIN = 8; // kept from the window's edges
 
   let host = null;
   let shadow = null;
   let els = {};
   let adapter = null;
   let templates = [];
-  let state = { collapsed: false, top: 96 };
+  // `pos` is where the panel was dragged to ({ left, top }), or null to sit beside the message box
+  let state = { collapsed: false, pos: null };
   let context = {};
   let contextBox = null;
   let contextCheckedAt = 0;
@@ -78,11 +82,14 @@
     .link { color: var(--accent); font-weight: 600; }
     .status { font-size: 12px; color: var(--muted); min-height: 16px; flex: 1; text-align: right; }
     .status.warn { color: var(--danger); }
+    /* Minimized: the panel's own card, shrunk to its icon */
     .tab {
-      display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 18px;
-      background: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,.18);
+      display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0;
+      background: var(--bg); color: var(--muted); border: 1px solid var(--border); border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.12), 0 2px 6px rgba(0,0,0,.08); transition: color .15s, background-color .15s;
     }
-    .wrap.dark .tab { color: #0b1a29; }
+    .tab:hover { color: var(--text); background: var(--hover); }
+    .tab .svg svg { width: 18px; height: 18px; }
   `;
 
   function isDarkPage() {
@@ -94,6 +101,8 @@
   const ICONS = {
     edit: '<path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2 7.6-7.6Z"/><path d="M9.3 4.2l2.5 2.5"/>',
     minimize: '<path d="M3.5 8h9"/>',
+    attach: '<path d="M8 2.5v7M5 6.5l3 3 3-3"/><path d="M3 13h10"/>',
+    chat: '<path d="M2.5 3.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H7.2L4.5 13.3V11h-1a1 1 0 0 1-1-1Z"/><path d="M5.2 5.6h5.6M5.2 8h3.6"/>',
     copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5"/>',
   };
   function icon(name) {
@@ -120,18 +129,25 @@
 
   function build() {
     host = document.createElement('connect-note-panel');
-    Object.assign(host.style, { position: 'fixed', right: '16px', zIndex: '2147483000' });
+    Object.assign(host.style, { position: 'fixed', left: '0', top: '0', zIndex: '2147483000' });
     shadow = host.attachShadow({ mode: 'closed' });
     shadow.append(el('style', { textContent: STYLE }));
 
     els.wrap = el('div', { className: `wrap${isDarkPage() ? ' dark' : ''}` });
-    els.tab = el('button', { className: 'tab', type: 'button', textContent: 'Templates', title: 'Show message templates' });
-    els.tab.addEventListener('click', () => setCollapsed(false));
+    // Minimized: a chat-bubble button beside the message box; click to open, drag to move
+    els.tab = iconButton('chat', 'Show message templates', () => setCollapsed(false));
+    els.tab.className = 'tab';
+    enableDragging(els.tab);
 
     els.title = el('h2');
     const collapse = iconButton('minimize', 'Collapse panel', () => setCollapsed(true));
     const settings = iconButton('edit', 'Edit templates', openEditor);
-    els.head = el('div', { className: 'head' }, els.title, settings, collapse);
+    els.attach = iconButton('attach', 'Put back next to the message box', () => {
+      state.pos = null;
+      applyState();
+      saveState();
+    });
+    els.head = el('div', { className: 'head' }, els.title, els.attach, settings, collapse);
     enableDragging(els.head);
 
     els.search = el('input', { type: 'search', placeholder: 'Filter templates' });
@@ -169,38 +185,121 @@
   }
 
   function applyState() {
-    host.style.top = `${state.top}px`;
+    els.attach.hidden = !state.pos;
     els.tab.hidden = !state.collapsed;
     els.panel.hidden = state.collapsed;
     els.panel.style.display = state.collapsed ? 'none' : '';
     els.tab.style.display = state.collapsed ? '' : 'none';
+    place();
   }
+
+  // The box's position in the main page, also for a box inside a same-origin frame
+  function boxRect(box) {
+    const rect = box.getBoundingClientRect();
+    const frame = box.ownerDocument.defaultView?.frameElement;
+    if (!frame) return rect;
+    const offset = frame.getBoundingClientRect();
+    return { left: rect.left + offset.left, right: rect.right + offset.left, top: rect.top + offset.top, bottom: rect.bottom + offset.top };
+  }
+
+  // Where the panel was dragged to, else beside the message box with their bottoms lined up: to
+  // its right if there's room (on the messaging page, over the right-hand column), else to its
+  // left (a pop-up chat in the corner), else just above it. Kept inside the window.
+  function place() {
+    if (!host) return;
+    const { width, height } = host.getBoundingClientRect();
+    let left = innerWidth - width - 16;
+    let top = 96;
+    let origin = 'top right';
+    const box = contextBox?.isConnected && contextBox.getClientRects().length ? boxRect(contextBox) : null;
+    if (state.pos) {
+      ({ left, top } = state.pos);
+      origin = 'top left';
+    } else if (box) {
+      top = box.bottom - height;
+      origin = 'bottom right';
+      if (box.right + GAP + width <= innerWidth - MARGIN) {
+        left = box.right + GAP;
+        origin = 'bottom left';
+      } else if (box.left - GAP - width >= MARGIN) left = box.left - GAP - width;
+      else {
+        left = box.right - width;
+        top = box.top - GAP - height;
+      }
+    }
+    els.panel.style.transformOrigin = els.tab.style.transformOrigin = origin;
+    left = Math.max(MARGIN, Math.min(left, innerWidth - width - MARGIN));
+    top = Math.max(MARGIN, Math.min(top, innerHeight - height - MARGIN));
+    host.style.left = `${Math.round(left)}px`;
+    host.style.top = `${Math.round(top)}px`;
+  }
+
+  // The box moves when the page scrolls or the window is resized; follow it once per frame
+  let placing = false;
+  function schedulePlace() {
+    if (placing || !host) return;
+    placing = true;
+    requestAnimationFrame(() => {
+      placing = false;
+      place();
+    });
+  }
+  addEventListener('resize', schedulePlace);
+  addEventListener('scroll', schedulePlace, true);
 
   function saveState() {
     chrome.storage.local.set({ [STATE_KEY]: state });
   }
 
-  function setCollapsed(collapsed) {
+  // Minimizing shrinks the panel into the corner the button then appears in (the one nearest the
+  // message box), and opening grows it back out of there
+  let switching = false;
+  async function setCollapsed(collapsed) {
+    if (switching || state.collapsed === collapsed) return;
+    switching = true;
+    const [from, to] = collapsed ? [els.panel, els.tab] : [els.tab, els.panel];
+    await play(from, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `scale(${collapsed ? 0.92 : 0.8})` }],
+      { duration: collapsed ? 140 : 90, easing: 'cubic-bezier(.4,0,1,1)' });
     state.collapsed = collapsed;
     applyState();
     saveState();
+    await play(to, [{ opacity: 0, transform: `scale(${collapsed ? 0.8 : 0.92})` }, { opacity: 1, transform: 'none' }],
+      { duration: collapsed ? 160 : 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    switching = false;
   }
 
-  // Drag the header to move the panel up or down
+  function play(node, keyframes, options) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
+    const animation = node.animate(keyframes, options);
+    // A background tab may not run animations; don't wait on one forever
+    return Promise.race([animation.finished, new Promise((resolve) => setTimeout(resolve, options.duration + 50))]).catch(() => {});
+  }
+
+  // Drag the header (or the minimized button) to move the panel anywhere; it then stays there
+  // instead of following the box. A click without moving does what it normally does.
   function enableDragging(handle) {
     handle.addEventListener('mousedown', (event) => {
-      if (event.target.closest('button')) return;
+      if (event.target.closest('button') !== (handle.tagName === 'BUTTON' ? handle : null)) return;
       event.preventDefault();
-      const startY = event.clientY;
-      const startTop = state.top;
+      const start = host.getBoundingClientRect();
+      const [startX, startY] = [event.clientX, event.clientY];
+      let moved = false;
       const move = (e) => {
-        state.top = Math.max(8, Math.min(window.innerHeight - 80, startTop + e.clientY - startY));
-        host.style.top = `${state.top}px`;
+        if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 4) return;
+        moved = true;
+        state.pos = { left: start.left + e.clientX - startX, top: start.top + e.clientY - startY };
+        els.attach.hidden = false;
+        place();
       };
       const stop = () => {
         removeEventListener('mousemove', move);
         removeEventListener('mouseup', stop);
+        if (!moved) return;
         saveState();
+        // A drag that ends on the minimized button also clicks it; that click shouldn't open the panel
+        const swallow = (e) => e.stopImmediatePropagation();
+        handle.addEventListener('click', swallow, { capture: true, once: true });
+        setTimeout(() => handle.removeEventListener('click', swallow, { capture: true }));
       };
       addEventListener('mousemove', move);
       addEventListener('mouseup', stop);
@@ -225,12 +324,16 @@
     render();
   }
 
-  // Who the message is for, refreshed when the target box changes (and at most once a second)
+  // Who the message is for, refreshed when the target box or the conversation (the address)
+  // changes, and at most once a second otherwise
+  let contextHref = null;
   async function refreshContext(force = false) {
     const box = CN.targetBox();
-    if (!force && box === contextBox && Date.now() - contextCheckedAt < CONTEXT_REFRESH_MS) return;
+    const moved = location.href !== contextHref;
+    if (!force && !moved && box === contextBox && Date.now() - contextCheckedAt < CONTEXT_REFRESH_MS) return;
     const boxChanged = box !== contextBox;
     contextBox = box;
+    contextHref = location.href;
     contextCheckedAt = Date.now();
     // No variables for this type means nothing about the recipient is used or shown
     if (!CN.TEMPLATE_TYPES[adapter.type].variables.length) {
@@ -238,7 +341,7 @@
       return;
     }
     const next = await adapter.getContext(box);
-    if (JSON.stringify(next) === JSON.stringify(context) && !force) return;
+    if (JSON.stringify(next) === JSON.stringify(context) && !force && !boxChanged) return;
     context = next;
     render();
   }
@@ -360,7 +463,8 @@
       adapter = active;
       await loadTemplates();
     }
-    if (host) refreshContext();
+    if (host) await refreshContext();
+    place();
   }
 
   chrome.storage.onChanged.addListener((_changes, area) => {

@@ -451,6 +451,83 @@
       expect('panel: never inserts into the recipient box', [recipientBox.value, closedRoot.querySelector('[contenteditable]').textContent],
         ['Lee', 'Thanks for connecting!']);
 
+      // Switching chats: LinkedIn swaps in a new message box and nothing has been clicked yet. The
+      // panel finds the open conversation's box itself, skipping hidden boxes and pop-up chats.
+      const showThread = (name) => {
+        closedRoot.innerHTML = `<main><div class="msg__detail">
+            <a class="msg-thread__link-to-profile" title="Open ${name}’s profile" href="#">${name}</a>
+            <div contenteditable="true" aria-label="Write a message…"></div></div></main>
+          <div class="msg-overlay"><h2 class="msg-overlay-bubble-header__title">Lee Park</h2>
+            <div contenteditable="true" aria-label="Write a message…"></div></div>
+          <div hidden><div contenteditable="true" aria-label="Write a message…"></div></div>`;
+      };
+      document.activeElement?.blur();
+      showThread('Sam Rivera');
+      history.pushState({}, '', '/messaging/thread/one/');
+      await wait(1200);
+      expect('panel: finds the open conversation without a click', CN.panel.root.querySelector('.to').textContent, 'To: Sam Rivera');
+      showThread('Priya Raman');
+      history.pushState({}, '', '/messaging/thread/two/');
+      await wait(1200);
+      expect('panel: follows a switch to another chat without a click', CN.panel.root.querySelector('.to').textContent, 'To: Priya Raman');
+      clickItem('Thanks for connecting');
+      await wait(200);
+      expect('panel: inserts into the open conversation, not the pop-up chat',
+        [...closedRoot.querySelectorAll('[contenteditable]')].map((b) => b.textContent), ['Thanks for connecting!', '', '']);
+
+      // Position: beside the message box, bottoms lined up; dragged elsewhere it stays there until put back
+      const mainBox = closedRoot.querySelector('main [contenteditable]');
+      mainBox.style.width = '200px';
+      await wait(900);
+      const panelRect = () => panelHost().getBoundingClientRect();
+      const besideBox = () => {
+        const [p, b] = [panelRect(), mainBox.getBoundingClientRect()];
+        const bottom = Math.max(8, Math.min(b.bottom - p.height, innerHeight - p.height - 8)) + p.height;
+        return Math.abs(p.left - (b.right + 12)) <= 1 && Math.abs(p.bottom - bottom) <= 1;
+      };
+      if (innerWidth >= 540) {
+        expect('panel: placed beside the message box', besideBox(), true);
+        const head = CN.panel.root.querySelector('.head');
+        const attach = CN.panel.root.querySelector('[aria-label="Put back next to the message box"]');
+        expect('panel: no "put back" button while beside the box', attach.hidden, true);
+        const before = panelRect();
+        head.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: before.left + 20, clientY: before.top + 10 }));
+        dispatchEvent(new MouseEvent('mousemove', { clientX: before.left - 20, clientY: before.top - 30 }));
+        dispatchEvent(new MouseEvent('mouseup', {}));
+        const after = panelRect();
+        expect('panel: dragged with the header', [Math.round(after.left - before.left), Math.round(after.top - before.top)],
+          [Math.max(-40, Math.round(8 - before.left)), Math.max(-40, Math.round(8 - before.top))]);
+        await wait(900);
+        expect('panel: stays where it was dragged, "put back" shown', [Math.round(panelRect().left), attach.hidden], [Math.round(after.left), false]);
+        attach.click();
+        await wait(100);
+        expect('panel: put back beside the message box', [besideBox(), attach.hidden], [true, true]);
+
+        // Minimized: a chat-bubble button beside the box, which can be dragged without opening
+        // (Waits allow for a background tab, where Chrome runs timers at most once a second)
+        CN.panel.root.querySelector('[aria-label="Collapse panel"]').click();
+        await wait(2500);
+        const bubbleButton = CN.panel.root.querySelector('.tab');
+        expect('panel: minimizes to a chat-bubble button beside the box',
+          [CN.panel.root.querySelector('.panel').hidden, bubbleButton.getAttribute('aria-label'), Boolean(bubbleButton.querySelector('svg')), besideBox()],
+          [true, 'Show message templates', true, true]);
+        const tabAt = panelRect();
+        bubbleButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: tabAt.left + 5, clientY: tabAt.top + 5 }));
+        dispatchEvent(new MouseEvent('mousemove', { clientX: tabAt.left - 25, clientY: tabAt.top - 25 }));
+        dispatchEvent(new MouseEvent('mouseup', {}));
+        bubbleButton.click(); // the click that ends a drag
+        expect('panel: minimized button dragged, still minimized',
+          [Math.round(panelRect().left - tabAt.left), CN.panel.root.querySelector('.panel').hidden], [-30, true]);
+        bubbleButton.click();
+        await wait(2500);
+        expect('panel: clicking the button opens it again', CN.panel.root.querySelector('.panel').hidden, false);
+        attach.click();
+        await wait(100);
+      } else {
+        results.push({ name: 'panel: position checks -- SKIPPED, window narrower than 540px', pass: true });
+      }
+      closedRoot.innerHTML = '';
+
       // Rich-text message box in the main page; cursor in the middle of existing text
       host.innerHTML = `<div><a href="#" aria-label="View Kim Tran's profile">Kim Tran</a><div id="msg"></div></div>`;
       const messageEditor = new Editor({
@@ -472,6 +549,52 @@
       } else {
         results.push({ name: 'panel: rich editor insert at cursor -- SKIPPED, click into this window and reload', pass: true });
       }
+
+      // Sales Navigator: a message to a connection (the compose window with no subject line) and
+      // the inbox use the panel; an InMail doesn't
+      const snMessage = CN.adapters.find((a) => a.id === 'sn-message');
+      history.pushState({}, '', '/sales/lead/123');
+      host.innerHTML = `<section role="dialog" aria-label="Conversation with Ana Diaz">
+        <textarea name="message" aria-label="Type your message here or create draft"></textarea></section>`;
+      expect('Sales Nav message: panel for a message with no subject', snMessage.matches(), true);
+      await CN.rememberPerson({ fullName: 'Ana Diaz', company: 'Globex', title: 'COO' });
+      expect('Sales Nav message: recipient from the window, company remembered', await snMessage.getContext(host.querySelector('textarea')),
+        { name: 'Ana', fullName: 'Ana Diaz', company: 'Globex', title: 'COO', ids: [] });
+      host.querySelector('section').insertAdjacentHTML('afterbegin', '<input id="compose-form-subject-ember2">');
+      expect('Sales Nav message: no panel for an InMail', snMessage.matches(), false);
+      history.pushState({}, '', '/sales/inbox/2-abc');
+      host.innerHTML = `<div><header><a href="/sales/lead/ACw1,NAME"><span data-anonymize="person-name">Kim Tran</span></a></header>
+        <ul><li><span data-anonymize="person-name">Dana Brooks</span> Hi!</li></ul><textarea name="message"></textarea></div>`;
+      const inbox = await snMessage.getContext(host.querySelector('textarea'));
+      expect('Sales Nav inbox: panel shown, recipient from the conversation header', [snMessage.matches(), inbox.fullName, inbox.ids],
+        [true, 'Kim Tran', ['sn-thread:2-abc']]);
+      host.innerHTML = '';
+      history.go(-2);
+      await wait(300);
+
+      // A profile's Message button opens a pop-up chat: the panel appears and inserts there, even
+      // after typing somewhere else on the page first
+      history.pushState({}, '', '/in/kim-tran/');
+      host.innerHTML = '<textarea id="comment" aria-label="Add a comment…"></textarea>';
+      const comment = host.querySelector('#comment');
+      await wait(900);
+      comment.focus();
+      comment.blur();
+      expect('panel: hidden on a profile with no chat open', panelHost(), null);
+      host.insertAdjacentHTML('beforeend', `<div class="msg-overlay-conversation-bubble">
+        <h2 class="msg-overlay-bubble-header__title">Kim Tran</h2><div contenteditable="true" aria-label="Write a message…"></div></div>`);
+      await wait(1500);
+      expect('panel: shown when a chat pops up on a profile, for that person',
+        [Boolean(panelHost()), CN.panel.root?.querySelector('.to').textContent], [true, 'To: Kim Tran']);
+      clickItem('Thanks for connecting');
+      await wait(200);
+      expect('panel: inserts into the chat that popped up', [comment.value, host.querySelector('[contenteditable]').textContent],
+        ['', 'Thanks for connecting!']);
+      host.innerHTML = '';
+      await wait(900);
+      expect('panel: gone when the chat closes', panelHost(), null);
+      history.back();
+      await wait(300);
 
       history.pushState({}, '', '/feed/');
       await wait(900);

@@ -1,10 +1,13 @@
-// Regular LinkedIn messaging (/messaging/...). Message templates aren't auto-filled: the panel
-// opens on these pages and clicking a template inserts it into the box you last typed in.
+// Regular LinkedIn messaging: the messaging page (/messaging/...), and pop-up chats on any page,
+// e.g. opened with the Message button on a profile. Message templates aren't auto-filled: the
+// panel opens while there's a message box and clicking a template inserts it into that box.
 CN.registerAdapter({
   id: 'li-message',
   type: 'message',
 
-  matches: () => location.pathname.startsWith('/messaging'),
+  // Sales Navigator has its own (sales-nav.js)
+  matches: () =>
+    location.pathname.startsWith('/messaging') || (!location.pathname.startsWith('/sales/') && CN.messageBoxes().length > 0),
 
   // `box` is the message box the template goes into, or null if none is known yet.
   // A conversation shows only the person's name and profile link, so their company and title

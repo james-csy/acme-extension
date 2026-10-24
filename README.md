@@ -48,7 +48,7 @@ a type and a message (InMails also have a subject). Types decide how a template 
 | --- | --- | --- |
 | Connection note | LinkedIn "Add a note", Sales Navigator Connect | Auto-fill from the type's default |
 | InMail | Sales Navigator InMail | Auto-fill (subject + message) from the default |
-| Message | LinkedIn messaging | Picked from the in-page panel, inserted at the cursor |
+| Message | LinkedIn messaging; Sales Navigator messages to connections and inbox | Picked from the in-page panel, inserted into the open conversation (or the box you last clicked) |
 
 Variables: `{name}`, `{fullName}`, `{company}` and `{title}`. Company and title come from a Sales
 Navigator lead's current role, or the current role in a profile's Experience section. Messaging
@@ -78,7 +78,7 @@ src/core/                shared by every box
 src/panel/panel.js       the docked template panel on pick-from-list pages
 src/adapters/            one file per LinkedIn box
   connect-note.js        regular LinkedIn "Add a note to your invitation"
-  sales-nav.js           Sales Navigator Connect note and InMail
+  sales-nav.js           Sales Navigator Connect note, InMail, messages and inbox
   messaging.js           regular LinkedIn messaging (panel, not auto-fill)
 src/background.js        opens the editor page when the panel asks
 icons/                   extension icon: icon.svg (48/128 px) and icon-small.svg (16/32 px), plus PNGs

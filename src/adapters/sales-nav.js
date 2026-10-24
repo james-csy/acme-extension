@@ -1,5 +1,5 @@
 // Sales Navigator (/sales/...): the Connect dialog's note and the InMail compose window, as opened
-// from a lead's page (fixtures/salesnav-connect.html and salesnav-inmail.html, captured Oct 2026).
+// from a lead's page, and the template panel for messages to connections and the inbox (fixtures/salesnav-connect.html and salesnav-inmail.html, captured Oct 2026).
 // Sales Navigator labels people and companies with data-anonymize attributes, which stay put when
 // its class names change.
 (() => {
@@ -29,6 +29,35 @@
       title: isLead ? lead.title : null,
     };
   }
+
+  // Who a compose window is for: the recipient's profile link, else its "Conversation with <Name>"
+  // label. (Not just any person-name in the window: the sender's signature has one too.)
+  function recipientIn(dialog) {
+    const link = dialog?.querySelector(
+      '[data-control-name="view_recipient_profile"] [data-anonymize^="person"], a[name="view_recipient_profile"] [data-anonymize="person-name"]'
+    );
+    const label = dialog?.getAttribute('aria-label') || '';
+    return textOf(link) || (label.startsWith('Conversation with ') ? label.slice('Conversation with '.length).trim() : null);
+  }
+
+  // In the inbox: the nearest name, walking out from the box, that links to a lead page. The
+  // conversation header links to the other person; your own name on sent messages doesn't.
+  // (Not checked against a saved inbox page yet; the panel's "To:" line shows what was found.)
+  function inboxRecipient(box) {
+    for (let node = box.parentElement; node; node = node.parentElement) {
+      const label = node.getAttribute('aria-label') || '';
+      if (label.startsWith('Conversation with ')) return label.slice('Conversation with '.length).trim();
+      const name = node.querySelector('a[href*="/sales/lead/"][data-anonymize^="person"], a[href*="/sales/lead/"] [data-anonymize^="person"]');
+      if (name) return textOf(name);
+    }
+    return null;
+  }
+
+  // A message to a connection opens the same compose window as an InMail, minus the subject line
+  const composingMessage = () =>
+    [...document.querySelectorAll('[role="dialog"] textarea[name="message"]')].some(
+      (box) => !box.closest('[role="dialog"]').querySelector('input[id^="compose-form-subject"]')
+    );
 
   CN.registerAdapter({
     id: 'sn-connect',
@@ -61,15 +90,26 @@
       },
       { key: 'body', selectors: ['textarea[id^="compose-form-text"]', 'textarea[name="message"]'] },
     ],
-    // The recipient's profile link in the compose window, else its "Conversation with <Name>" label.
-    // (Not just any person-name in the window: the sender's signature has one too.)
     async getContext(doc, box) {
+      return contextFor(recipientIn(box?.closest('[role="dialog"]')), doc);
+    },
+  });
+
+  // Messages to connections and replies in the inbox: picked from the panel, like regular
+  // LinkedIn messages. Company and title come from the open lead page, else from what's been
+  // remembered or typed into the panel (saved under the inbox conversation and the name).
+  CN.registerAdapter({
+    id: 'sn-message',
+    type: 'message',
+    matches: () => onSalesNav() && (location.pathname.startsWith('/sales/inbox') || composingMessage()),
+    async getContext(box) {
       const dialog = box?.closest('[role="dialog"]');
-      const label = dialog?.getAttribute('aria-label') || '';
-      const fullName =
-        textOf(dialog?.querySelector('a[name="view_recipient_profile"] [data-anonymize="person-name"]')) ||
-        (label.startsWith('Conversation with ') ? label.slice('Conversation with '.length).trim() : null);
-      return contextFor(fullName, doc);
+      const fullName = box ? (dialog && recipientIn(dialog)) || inboxRecipient(box) : null;
+      const thread = location.pathname.match(/^\/sales\/inbox\/([^/?#]+)/)?.[1];
+      const ids = thread ? [`sn-thread:${thread}`] : [];
+      const lead = contextFor(fullName, document);
+      const known = box && !lead.company ? await CN.recallPerson({ ids, fullName }) : null;
+      return { ...lead, company: lead.company || known?.company || null, title: lead.title || known?.title || null, ids };
     },
   });
 })();

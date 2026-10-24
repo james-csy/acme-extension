@@ -47,6 +47,7 @@
   function trackFocus() {
     CN.searchRoots().forEach(watchRoot);
     frameDocuments().forEach(watchRoot);
+    noticeNewBoxes();
   }
 
   // The focused element, followed down into shadow roots (open or closed) and same-origin frames.
@@ -70,25 +71,45 @@
     return active;
   }
 
-  // The box to insert into: the focused text box, else the last one used, else the page's
-  // message box if there's exactly one obvious one
-  function targetBox() {
-    const focused = deepActiveElement();
-    if (isTextBox(focused) && !CN.isPanelNode?.(focused)) return focused;
-    if (lastBox?.isConnected) return lastBox;
-    const roots = [...CN.searchRoots(), ...frameDocuments()];
-    const candidates = roots
-      .flatMap((root) => [...root.querySelectorAll('[contenteditable="true"], textarea')])
-      // Outermost editors only, not the editable paragraphs inside them
-      .filter((el) => isTextBox(el) && !el.parentElement?.isContentEditable);
+  const isShown = (el) => el.isConnected && el.getClientRects().length > 0;
+
+  // The message boxes on screen ("Write a message…"): the messaging page's, and pop-up chats on
+  // any page. Outermost editors only, not the editable paragraphs inside them.
+  function messageBoxes() {
     // "Write a message…" can be the box's label or placeholder, or a placeholder on its first line
     const hint = (el) =>
       ['aria-label', 'placeholder', 'aria-placeholder', 'data-placeholder']
         .flatMap((attr) => [el.getAttribute(attr), el.firstElementChild?.getAttribute(attr)])
         .join(' ');
-    const messageBoxes = candidates.filter((el) => /message/i.test(hint(el)));
-    return messageBoxes.length === 1 ? messageBoxes[0] : null;
+    return [...CN.searchRoots(), ...frameDocuments()]
+      .flatMap((root) => [...root.querySelectorAll('[contenteditable="true"], textarea')])
+      .filter((el) => isTextBox(el) && !el.parentElement?.isContentEditable && isShown(el) && /message/i.test(hint(el)));
   }
 
-  Object.assign(CN, { trackFocus, targetBox });
+  // A message box that has just appeared on its own -- a chat opened with a profile's Message
+  // button, or one expanded again -- becomes the box to insert into, as if it had been clicked.
+  // (Several at once, as when a page loads, is left to targetBox's rules.)
+  let shownBefore = new Set();
+  function noticeNewBoxes() {
+    const shown = messageBoxes();
+    const appeared = shown.filter((box) => !shownBefore.has(box));
+    if (appeared.length === 1) lastBox = appeared[0];
+    shownBefore = new Set(shown);
+  }
+
+  // The box to insert into: the focused text box, else the last one used (or just opened) while
+  // it's still on screen, else the page's message box found without a click. Switching chats can
+  // swap in a new box, so the open conversation's box is found again: the only visible one, or
+  // with pop-up chats open too, the one in the page's main conversation.
+  function targetBox() {
+    const focused = deepActiveElement();
+    if (isTextBox(focused) && !CN.isPanelNode?.(focused)) return focused;
+    if (lastBox && isShown(lastBox)) return lastBox;
+    const boxes = messageBoxes();
+    if (boxes.length === 1) return boxes[0];
+    const inConversation = boxes.filter((el) => el.closest('main, .msg__detail, .scaffold-layout__detail'));
+    return inConversation.length === 1 ? inConversation[0] : null;
+  }
+
+  Object.assign(CN, { trackFocus, targetBox, messageBoxes });
 })();
