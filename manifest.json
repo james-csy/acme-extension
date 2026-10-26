@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LinkedIn Connect Note",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Fills your saved templates into LinkedIn's connection note and message boxes.",
   "permissions": [
     "storage",
