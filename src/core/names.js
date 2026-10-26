@@ -42,6 +42,7 @@
   // The person a message box is for: the nearest name source walking out from the box (crossing
   // shadow-root boundaries), with the id from their profile link when there is one. Skip the
   // signed-in person's own name, which appears on their sent messages.
+  // `headline` is their headline when the conversation shows it next to their name (see below).
   function personNear(box) {
     const own = ownName();
     let node = box;
@@ -51,7 +52,7 @@
         for (const el of node?.querySelectorAll?.(selector) || []) {
           const name = read(el).replace(/[’']s profile$/, '').replace(/\s+/g, ' ').trim();
           if (name && name !== own) {
-            return { fullName: name, profileId: CN.profileIdOf(el.closest('a[href]')?.getAttribute('href')) };
+            return { fullName: name, profileId: CN.profileIdOf(el.closest('a[href]')?.getAttribute('href')), job: jobNear(node, el, name) };
           }
         }
       }
@@ -60,6 +61,34 @@
   }
 
   const nameNear = (box) => personNear(box)?.fullName ?? null;
+
+  // Their job, from a headline the conversation shows next to their name: in the chat header, or
+  // the profile card at the top of a new conversation. Looks at each place their name or profile
+  // link appears in the conversation, and reads the line right after their name (skipping the
+  // connection degree and pronouns) as a headline. Beside their messages that line is a time, and
+  // online status ("Mobile • 1h ago") isn't a headline either, so those give nothing (headline.js).
+  const NOT_HEADLINE = /^[·•]?\s*(1st|2nd|3rd\+?)\b|degree connection|^\(?\s*(he|she|they)\s*\//i;
+  function jobNear(conversation, nameElement, fullName) {
+    const id = CN.profileIdOf(nameElement.closest('a[href]')?.getAttribute('href'));
+    const links = id ? [...conversation.querySelectorAll('a[href*="/in/"]')].filter((a) => CN.profileIdOf(a.getAttribute('href')) === id) : [];
+    for (const spot of new Set([nameElement, ...links])) {
+      // The smallest container around it with a line after the name, kept short so it's the
+      // header or card, not the whole conversation
+      let container = spot;
+      for (let i = 0; i < 4 && container.parentElement; i += 1) {
+        container = container.parentElement;
+        const text = container.innerText || '';
+        if (text.length > 400) break;
+        const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+        const after = lines.slice(lines.findIndex((line) => line.includes(fullName)) + 1).filter((line) => !NOT_HEADLINE.test(line));
+        if (!lines.some((line) => line.includes(fullName)) || !after.length) continue;
+        const job = CN.companyFromHeadline(after[0]);
+        if (job) return job;
+        break; // the line after the name here isn't a headline: try the next place they're named
+      }
+    }
+    return null;
+  }
 
   // The signed-in person, from the global nav's "Me" photo, when LinkedIn labels it
   function ownName() {

@@ -467,6 +467,25 @@
         [fromProfile.company, fromProfile.title], ['Initech', 'CTO']);
       classic.querySelector('.msg-thread__link-to-profile').href = 'https://www.linkedin.com/in/ACoAAother/';
       expect('messaging: nobody remembered, no company', (await messaging.getContext(classic.querySelector('[contenteditable]'))).company, null);
+      // Not remembered, but the conversation shows their headline next to their name: read from
+      // there (and remembered as a guess). Their messages are never read as a headline.
+      const chat = (under) => {
+        host.innerHTML = `<div class="msg-convo-wrapper">
+          <div class="msg-title-bar"><a class="msg-thread__link-to-profile" title="Open Nia Okafor’s profile" href="https://www.linkedin.com/in/ACoAAnia/">
+            <h2 class="msg-entity-lockup__entity-title">Nia Okafor</h2></a><p>${under}</p></div>
+          <ul><li><a href="https://www.linkedin.com/in/ACoAAnia/">Nia Okafor</a><p>10:42 AM</p><p>VP Sales at Wrongco here, happy to chat</p></li></ul>
+          <form><div contenteditable="true" aria-label="Write a message…"></div></form></div>`;
+        return host.querySelector('[contenteditable]');
+      };
+      const fromHeader = await messaging.getContext(chat('Head of Sales @ Initech | Ex-Globex'));
+      expect('messaging: company from the headline in the chat header, marked as a guess',
+        [fromHeader.company, fromHeader.title, fromHeader.companySource], ['Initech', 'Head of Sales', 'headline']);
+      expect('messaging: headline guess remembered', (await CN.recallPerson({ ids: ['ACoAAnia'] }))?.source, 'headline');
+      store.local = {};
+      expect('messaging: online status in the header and a message mentioning a company give nothing',
+        (await messaging.getContext(chat('Mobile • 1h ago'))).company, null);
+      host.innerHTML = '';
+      store.local = {};
       const bubble = document.createElement('div');
       bubble.innerHTML = `<header><h2 class="msg-overlay-bubble-header__title"> Priya  Raman </h2></header>
         <form><div contenteditable="true"></div></form>`;
