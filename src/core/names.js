@@ -2,16 +2,19 @@
 (() => {
   const RECENT_NAME_TTL_MS = 15000;
 
-  // Adapters call this when the person is known from a click (e.g. a Connect button). It's kept
-  // in storage, not a variable, so a dialog opening inside another frame can still read it.
-  function rememberName(fullName) {
-    chrome.storage.local.set({ clickedName: { name: fullName, at: Date.now() } });
+  // Adapters call this when the person is known from a click (e.g. a Connect button), with what
+  // their card said about their job, if anything ({ company, title }). It's kept in storage, not a
+  // variable, so a dialog opening inside another frame can still read it.
+  function rememberName(fullName, job = null) {
+    chrome.storage.local.set({ clickedName: { name: fullName, company: job?.company || null, title: job?.title || null, at: Date.now() } });
   }
 
-  async function recentName() {
+  // { name, company, title } of the person clicked in the last few seconds, or null
+  async function recentClick() {
     const { clickedName } = await chrome.storage.local.get('clickedName');
-    return clickedName && Date.now() - clickedName.at < RECENT_NAME_TTL_MS ? clickedName.name : null;
+    return clickedName && Date.now() - clickedName.at < RECENT_NAME_TTL_MS ? clickedName : null;
   }
+  const recentName = async () => (await recentClick())?.name ?? null;
 
   // The person whose profile page this is, if it is one
   function profileName(doc) {
@@ -76,5 +79,5 @@
       : first;
   }
 
-  Object.assign(CN, { rememberName, recentName, profileName, personNear, nameNear, firstNameOf });
+  Object.assign(CN, { rememberName, recentClick, recentName, profileName, personNear, nameNear, firstNameOf });
 })();

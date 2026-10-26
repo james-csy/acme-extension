@@ -66,6 +66,7 @@
     <script src="../src/core/types.js"></script>
     <script src="../src/core/template.js"></script>
     <script src="../src/core/names.js"></script>
+    <script src="../src/core/headline.js"></script>
     <script src="../src/core/people.js"></script>
     <script src="../src/core/fill.js"></script>
     <script src="../src/core/storage.js"></script>
@@ -110,6 +111,45 @@
       expect('variables: messages fill the name', [CN.unsupportedVariables('message', 'Hey {name} {team}'), CN.fillForType('message', 'Hey {name}', { name: 'Jo' })], [['team'], 'Hey Jo']);
       expect('variables: fillForType fills supported ones', CN.fillForType('connection_note', 'Hi {name:upper} {team}', { name: 'Jo', team: 'X' }), 'Hi JO {team}');
       expect('names: first name', ['Dr. Jane Smith', 'DANA BROOKS', '🚀 Maria Ruiz'].map(CN.firstNameOf), ['Jane', 'Dana', 'Maria']);
+
+      // --- Headlines: company and title, or nothing when unsure ----------------
+      const headlines = [
+        ['Head of Sales @ Acme | Ex-Google', 'Acme', 'Head of Sales'],
+        ['Founder @Acme', 'Acme', 'Founder'],
+        ['Founder @hubspot', 'hubspot', 'Founder'],
+        ['Account Executive at Salesforce', 'Salesforce', 'Account Executive'],
+        ['Current: Account Executive at Gong', 'Gong', 'Account Executive'],
+        ['Ex-Google, now Founder @Acme', 'Acme', 'Founder'],
+        ['Senior AE at Gong | Ex-Outreach', 'Gong', 'Senior AE'],
+        ['VP Marketing at Bank of America', 'Bank of America', 'VP Marketing'],
+        ['Director at Johnson & Johnson', 'Johnson & Johnson', 'Director'],
+        ['Network Engineer at AT&T', 'AT&T', 'Network Engineer'],
+        ['CEO at Acme Inc. (YC W23)', 'Acme Inc', 'CEO'],
+        ['CEO at Acme, building the future of work', 'Acme', 'CEO'],
+        ['Head Of Sales At Acme', 'Acme', 'Head Of Sales'],
+        ['Founder @Acme | Advisor @Beta', 'Acme', 'Founder'],
+        ['🚀 Growth @ Notion 🚀', 'Notion', 'Growth'],
+        ['Product Manager at Meta · Stanford MBA', 'Meta', 'Product Manager'],
+        ['CRO at The Trade Desk', 'The Trade Desk', 'CRO'],
+        ['Currently Head of Growth @ Ramp', 'Ramp', 'Head of Growth'],
+        ['Partner at Sequoia Capital | Board member @ Acme', 'Sequoia Capital', 'Partner'],
+        ['Founder and CEO at Acme', 'Acme', 'Founder and CEO'],
+        ['Building @ Acme', 'Acme', null],
+        // Old jobs, sentences, skills, placeholders, emails and handles: nothing
+        ...[
+          'Past: VP Sales at Oracle', 'Former VP Sales at Oracle', 'Previously @Stripe', 'Great at building teams',
+          'Expert at Salesforce', 'Sales professional looking at New Opportunities', 'Helping Companies Grow At Scale',
+          'Sales Leader At Heart', 'Sales Leader At The Intersection Of Tech', 'Founder at Stealth',
+          'Engineer @ Stealth Startup', 'Self-employed', 'Email me: jo@acme.com', 'Tweets @jsmith about sales',
+          'Talks about #sales and #leadership', 'Working at Google', 'Software Engineer at a fintech startup',
+          'Investor | Advisor | Ex-Meta', 'Struggling to book meetings? Getting ghosted? Read this profile.',
+        ].map((text) => [text, null, null]),
+      ];
+      const wrongHeadlines = headlines.filter(([text, company, title]) => {
+        const found = CN.companyFromHeadline(text);
+        return (found?.company ?? null) !== company || (company && (found?.title ?? null) !== title);
+      });
+      expect(`headlines: ${headlines.length} examples read as expected`, wrongHeadlines.map(([text]) => [text, CN.companyFromHeadline(text)]), []);
 
       // --- Library: migration -------------------------------------------------
       store.sync = { noteTemplate: 'old v0.4 note' };
@@ -172,6 +212,23 @@
         ['Basecamp', 'Head of Sales']);
       const ended = experience(`<div componentkey="entity-collection-item-1"><p>Head of Sales</p><p>Basecamp</p><p>Feb 2018 - Jan 2019 · 1 yr</p></div>`);
       expect('profile: no current role, no company', (await adapter.getContext(ended)).company, null);
+      // No current role in Experience: the headline under the name is read instead
+      const fromHeadline = experience(`<div componentkey="entity-collection-item-1"><p>Head of Sales</p><p>Basecamp</p><p>Feb 2018 - Jan 2019 · 1 yr</p></div>`);
+      fromHeadline.querySelector('h2').insertAdjacentHTML('afterend', '<p>· 2nd</p><p>VP Sales @ Globex | Ex-Basecamp</p>');
+      expect('profile: company and title from the headline when Experience has no current role',
+        [(await adapter.getContext(fromHeadline)).company, (await adapter.getContext(fromHeadline)).title], ['Globex', 'VP Sales']);
+      expect('profile: Experience wins over the headline',
+        (await adapter.getContext((() => { single.querySelector('h2').insertAdjacentHTML('afterend', '<p>CEO @ Other</p>'); return single; })())).company, 'Basecamp');
+
+      // Remembered companies: a weaker source never replaces a stronger one
+      await CN.rememberPerson({ ids: ['p1'], fullName: 'Rank Test', company: 'FromRole', source: 'role' });
+      await CN.rememberPerson({ ids: ['p1'], fullName: 'Rank Test', company: 'FromHeadline', source: 'headline' });
+      const afterHeadline = (await CN.recallPerson({ ids: ['p1'] }))?.company;
+      await CN.rememberPerson({ ids: ['p1'], fullName: 'Rank Test', company: 'Typed', source: 'typed' });
+      await CN.rememberPerson({ ids: ['p1'], fullName: 'Rank Test', company: 'NewRole', source: 'role' });
+      expect('people: headline doesn\'t replace a job, a job doesn\'t replace a typed company',
+        [afterHeadline, (await CN.recallPerson({ ids: ['p1'] }))?.company], ['FromRole', 'Typed']);
+      store.local = {};
 
       // --- Fixtures: saved LinkedIn pages --------------------------------------
       // fixtures/ holds real people's pages, so it's kept out of git (see .gitignore), along with
@@ -192,7 +249,7 @@
         expect('profile: note for someone else (sidebar Connect) gets no company', (await adapter.getContext(profile)).company, null);
         store.local = {};
         expect('profile: remembered with its id and address', adapter.personOnPage(profile, `/in/${P.address}/`),
-          { ids: [P.id, P.address], fullName: P.fullName, title: P.title, company: P.company });
+          { ids: [P.id, P.address], fullName: P.fullName, title: P.title, company: P.company, source: 'role' });
         expect('profile: nothing remembered while the page still shows someone else', adapter.personOnPage(profile, '/in/kim-tran/'), null);
 
         const snConnect = await parse('../fixtures/salesnav-connect.html');
@@ -214,7 +271,7 @@
         expect('Sales Nav InMail: message box found in the same dialog',
           snAdapter('sn-inmail').fields[1].selectors.map((sel) => firstBox('sn-inmail', snInmail).closest('[role="dialog"]').querySelector(sel)).find(Boolean)?.tagName, 'TEXTAREA');
         expect('Sales Nav: lead remembered by name', snAdapter('sn-connect').personOnPage(snInmail, '/sales/lead/ACwAA123,NAME_SEARCH'),
-          { ids: [], fullName: L.fullName, title: L.title, company: L.company });
+          { ids: [], fullName: L.fullName, title: L.title, company: L.company, source: 'role' });
         snInmail.querySelector('h1[data-anonymize="person-name"]').textContent = 'Someone Else';
         expect('Sales Nav: dialog for another person gets no company', (await snAdapter('sn-inmail').getContext(snInmail, firstBox('sn-inmail', snInmail))).company, null);
       }
@@ -266,6 +323,16 @@
       ta = openDialog();
       await wait(900);
       expect('e2e: name from Connect button', ta.value, 'Hi Kim, would love to connect!');
+      store.local = {};
+
+      // A search-result card: its "Current: ... at ..." line gives the company for that person's note
+      host.innerHTML = `<ul><li><a href="/in/lee-park/">Lee Park</a><p>Investor | Advisor</p><p>Current: Head of Sales at Initech</p>
+        <button aria-label="Invite Lee Park to connect">Connect</button></li></ul>`;
+      host.querySelector('button').click();
+      await wait(50);
+      const fromCard = await adapter.getContext(document);
+      expect('connect: company and title from the clicked card', [fromCard.fullName, fromCard.company, fromCard.title], ['Lee Park', 'Initech', 'Head of Sales']);
+      host.innerHTML = '';
       store.local = {};
 
       // 3b. LinkedIn redraws the box right after it's filled and drops the text: filled again
@@ -605,7 +672,7 @@
       expect('Sales Nav message: panel for a message with no subject', snMessage.matches(), true);
       await CN.rememberPerson({ fullName: 'Ana Diaz', company: 'Globex', title: 'COO' });
       expect('Sales Nav message: recipient from the window, company remembered', await snMessage.getContext(host.querySelector('textarea')),
-        { name: 'Ana', fullName: 'Ana Diaz', company: 'Globex', title: 'COO', ids: [] });
+        { name: 'Ana', fullName: 'Ana Diaz', company: 'Globex', title: 'COO', companySource: 'role', ids: [] });
       host.querySelector('section').insertAdjacentHTML('afterbegin', '<input id="compose-form-subject-ember2">');
       expect('Sales Nav message: no panel for an InMail', snMessage.matches(), false);
       history.pushState({}, '', '/sales/inbox/2-abc');

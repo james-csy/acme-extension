@@ -24,6 +24,8 @@ CN.registerAdapter({
       fullName,
       company: known?.company || null,
       title: known?.title || null,
+      // 'headline' when the company is a guess from their headline; the panel says so
+      companySource: known?.company ? known.source || 'role' : null,
       ids,
     };
   },

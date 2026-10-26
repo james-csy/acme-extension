@@ -69,7 +69,7 @@
     personOnPage(doc, path = location.pathname) {
       if (!path.startsWith('/sales/lead/')) return null;
       const lead = openLead(doc);
-      return lead.fullName ? { ids: [], ...lead } : null;
+      return lead.fullName ? { ids: [], ...lead, source: 'role' } : null;
     },
     // The dialog shows who the invitation is for, above the note
     async getContext(doc, box) {
@@ -109,7 +109,8 @@
       const ids = thread ? [`sn-thread:${thread}`] : [];
       const lead = contextFor(fullName, document);
       const known = box && !lead.company ? await CN.recallPerson({ ids, fullName }) : null;
-      return { ...lead, company: lead.company || known?.company || null, title: lead.title || known?.title || null, ids };
+      const companySource = lead.company ? 'role' : known?.company ? known.source || 'role' : null;
+      return { ...lead, company: lead.company || known?.company || null, title: lead.title || known?.title || null, companySource, ids };
     },
   });
 })();

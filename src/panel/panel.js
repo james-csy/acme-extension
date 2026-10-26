@@ -65,6 +65,7 @@
       border: 1px solid var(--border); border-radius: 6px; outline: none;
     }
     .company input:focus { border-color: var(--accent); }
+    .company .guess { flex: none; font-size: 11px; color: var(--muted); font-style: italic; }
     .list { overflow-y: auto; padding: 0 6px 6px; }
     .item { display: flex; align-items: flex-start; gap: 6px; width: 100%; padding: 8px; border-radius: 8px; text-align: left; cursor: pointer; }
     .item:hover, .item:focus-visible { background: var(--hover); }
@@ -174,11 +175,15 @@
     els.company = el('input', { type: 'text', placeholder: 'Not known yet, type it to use it' });
     els.company.setAttribute('aria-label', "Recipient's company");
     els.company.addEventListener('input', () => {
-      context = { ...context, company: els.company.value.trim() || null };
-      CN.rememberPerson({ ids: context.ids, fullName: context.fullName, company: context.company, title: context.title });
+      context = { ...context, company: els.company.value.trim() || null, companySource: 'typed' };
+      typedCompanies.set(personKey(context), context.company);
+      CN.rememberPerson({ ids: context.ids, fullName: context.fullName, company: context.company, title: context.title, source: 'typed' });
+      els.companyGuess.hidden = true;
       renderList();
     });
-    els.companyRow = el('label', { className: 'company' }, 'Company', els.company);
+    // A company read from their headline is a guess: say so, so it gets a look before sending
+    els.companyGuess = el('span', { className: 'guess', textContent: 'from headline', title: 'Read from their LinkedIn headline. Check it, or type the right one.' });
+    els.companyRow = el('label', { className: 'company' }, 'Company', els.company, els.companyGuess);
     els.list = el('div', { className: 'list' });
     const create = el('button', { className: 'link', type: 'button', textContent: '+ New template' });
     create.addEventListener('click', openEditor);
@@ -408,6 +413,11 @@
     render();
   }
 
+  // Companies typed into the panel, per person: a refresh that reads storage before the typed one
+  // is saved mustn't undo it
+  const typedCompanies = new Map();
+  const personKey = (c) => `${c.fullName}|${(c.ids || []).join('|')}`;
+
   // Who the message is for, refreshed when the target box or the conversation (the address)
   // changes, and at most once a second otherwise
   let contextHref = null;
@@ -425,7 +435,8 @@
       if (boxChanged) render();
       return;
     }
-    const next = await adapter.getContext(box);
+    let next = await adapter.getContext(box);
+    if (typedCompanies.has(personKey(next))) next = { ...next, company: typedCompanies.get(personKey(next)), companySource: 'typed' };
     if (JSON.stringify(next) === JSON.stringify(context) && !force && !boxChanged) return;
     context = next;
     render();
@@ -452,6 +463,7 @@
     els.companyRow.hidden = !(usesCompany && contextBox && (context.ids?.length || context.fullName));
     // Don't overwrite what's being typed
     if (shadow.activeElement !== els.company) els.company.value = context.company || '';
+    els.companyGuess.hidden = context.companySource !== 'headline';
 
     renderList();
   }

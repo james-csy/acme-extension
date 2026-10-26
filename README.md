@@ -97,11 +97,14 @@ a type and a message (InMails also have a subject). Types decide how a template 
 | InMail | Sales Navigator InMail | Auto-fill (subject + message) from the default |
 | Message | LinkedIn messaging; Sales Navigator messages to connections and inbox | Picked from the in-page panel, inserted into the open conversation (or the box you last clicked) |
 
-Variables: `{name}`, `{fullName}`, `{company}` and `{title}`. Company and title come from a Sales
-Navigator lead's current role, or the current role in a profile's Experience section. Messaging
-threads don't show them, so they're remembered from profile and lead pages you've opened (on this
-device), or typed into the panel's Company field. Not every page has them, so those two need a
-fallback: `{company|your team}`. Casing: `{name:upper}`, `:lower`, `:title`.
+Variables: `{name}`, `{fullName}`, `{company}` and `{title}`. Company and title come from, best first:
+what you typed into the panel's Company field; a Sales Navigator lead's current role, or the current
+role in a profile's Experience section; else their headline (`Head of Sales @ Acme`, `VP Sales at
+Acme`, a search result's `Current: … at …` line), read only when the pattern is unmistakable
+(`src/core/headline.js`; old jobs, sentences and placeholders like "Stealth" give nothing). The
+panel marks a headline guess "from headline". Messaging threads don't show any of this, so it's
+remembered from profile and lead pages you've opened (on this device). Not every page has them, so
+those two need a fallback: `{company|your team}`. Casing: `{name:upper}`, `:lower`, `:title`.
 
 Manage them on the options page (popup → **Edit templates**). The popup switches the default per type,
 turns auto-fill off, and has **Save this page for debugging**. Export/Import moves a library between
@@ -116,7 +119,9 @@ src/core/                shared by every box
   types.js               template types: fields, auto-fill or picker, character limits
   template.js            filling {variables}: :lower :upper :title casing, |fallback text
   names.js               first-name parsing, profile name, clicked-name memory, recipient near a box
-  people.js              company/title remembered from profile and lead pages, for messaging
+  headline.js            company and job title from a headline, only when unmistakable
+  people.js              company/title remembered from profile and lead pages, for messaging,
+                         ranked by source (typed > current role > headline)
   fill.js                filling textareas/inputs and rich-text editors
   storage.js             template library, defaults, settings, export/import, migration
   focus.js               which text box the panel inserts into (incl. closed shadow roots, frames)

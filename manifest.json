@@ -20,6 +20,7 @@
         "src/core/types.js",
         "src/core/template.js",
         "src/core/names.js",
+        "src/core/headline.js",
         "src/core/people.js",
         "src/core/fill.js",
         "src/core/storage.js",

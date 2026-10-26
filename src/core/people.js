@@ -3,8 +3,13 @@
 // user opened earlier (their profile, their Sales Navigator lead page) or from what the user typed
 // in the panel. Kept in chrome.storage.local (this device only), one key per way of recognising
 // someone: 'person:<profile id>', 'person:<profile address>', 'person:name:<full name>'.
+//
+// Each record says where its company came from, and a weaker source never replaces a stronger one:
+// typed in the panel > the current job on their profile or lead page ('role') > read from their
+// headline ('headline', a guess; see headline.js).
 (() => {
   const PREFIX = 'person:';
+  const RANK = { headline: 1, role: 2, typed: 3 };
 
   // Most specific first: ids, then the name (two people with the same name are rare among the
   // ones one person looks at, but an id match always wins)
@@ -14,11 +19,14 @@
     return keys;
   }
 
-  async function rememberPerson({ ids, fullName, company, title }) {
+  async function rememberPerson({ ids, fullName, company, title, source = 'role' }) {
     const keys = keysFor({ ids, fullName });
     if (!keys.length) return;
-    const record = { fullName, company: company || null, title: title || null, at: Date.now() };
-    await chrome.storage.local.set(Object.fromEntries(keys.map((key) => [key, record])));
+    const existing = await chrome.storage.local.get(keys);
+    const record = { fullName, company: company || null, title: title || null, source, at: Date.now() };
+    const kept = (old) => old?.company && (RANK[old.source] ?? RANK.role) > RANK[source];
+    const updates = keys.filter((key) => !kept(existing[key])).map((key) => [key, record]);
+    if (updates.length) await chrome.storage.local.set(Object.fromEntries(updates));
   }
 
   async function recallPerson({ ids, fullName }) {
@@ -39,7 +47,7 @@
       if (!person || !(person.company || person.title)) continue;
       notedHref = location.href;
       rememberPerson(person);
-      CN.log(`[${adapter.id}] Remembered`, person.fullName, [person.title, person.company].filter(Boolean).join(' at '));
+      CN.log(`[${adapter.id}] Remembered`, person.fullName, [person.title, person.company].filter(Boolean).join(' at '), `(${person.source || 'role'})`);
       return;
     }
   }
