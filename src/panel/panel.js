@@ -82,14 +82,27 @@
     .link { color: var(--accent); font-weight: 600; }
     .status { font-size: 12px; color: var(--muted); min-height: 16px; flex: 1; text-align: right; }
     .status.warn { color: var(--danger); }
-    /* Minimized: the panel's own card, shrunk to its icon */
+    /* Minimized: the panel's card shrunk to its icon, in the accent colour so it stands out on the page */
     .tab {
-      display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0;
-      background: var(--bg); color: var(--muted); border: 1px solid var(--border); border-radius: 10px;
-      box-shadow: 0 8px 24px rgba(0,0,0,.12), 0 2px 6px rgba(0,0,0,.08); transition: color .15s, background-color .15s;
+      display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0;
+      background: var(--accent); color: var(--bg); border: none; border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(10,102,194,.35), 0 2px 6px rgba(0,0,0,.15);
+      transition: filter .15s, transform .15s, box-shadow .15s;
     }
-    .tab:hover { color: var(--text); background: var(--hover); }
-    .tab .svg svg { width: 18px; height: 18px; }
+    .tab:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 10px 24px rgba(10,102,194,.4), 0 2px 6px rgba(0,0,0,.15); }
+    .tab .svg svg { width: 20px; height: 20px; stroke-width: 1.5; }
+    /* A newer version: a dot on the minimized button, a strip under the header */
+    .tab { position: relative; }
+    .tab.has-update::after {
+      content: ""; position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%;
+      background: #e8590c; border: 2px solid var(--bg);
+    }
+    .notice {
+      display: flex; align-items: center; gap: 8px; margin: 10px 12px 0; padding: 7px 8px 7px 10px;
+      background: var(--accent-bg); border-radius: 8px; font-size: 12px;
+    }
+    .notice span { flex: 1; }
+    .notice button { padding: 3px 10px; border-radius: 12px; background: var(--accent); color: var(--bg); font-weight: 600; font-size: 12px; }
   `;
 
   function isDarkPage() {
@@ -150,6 +163,8 @@
     els.head = el('div', { className: 'head' }, els.title, els.attach, settings, collapse);
     enableDragging(els.head);
 
+    els.notice = el('div', { className: 'notice', hidden: true });
+
     els.search = el('input', { type: 'search', placeholder: 'Filter templates' });
     els.search.setAttribute('aria-label', 'Filter templates');
     els.search.addEventListener('input', render);
@@ -172,6 +187,7 @@
       'div',
       { className: 'panel' },
       els.head,
+      els.notice,
       el('div', { className: 'search' }, els.search),
       els.to,
       els.companyRow,
@@ -182,6 +198,35 @@
     shadow.append(els.wrap);
     document.documentElement.append(host);
     applyState();
+    // Show what's known about updates, and check the folder now (the answer arrives as a change
+    // to `notice`, below)
+    chrome.storage.local.get('notice').then(({ notice }) => showNotice(notice));
+    chrome.runtime.sendMessage({ type: 'check-update' }).catch(() => {});
+  }
+
+  // A newer version (see background.js): ready in the folder of an auto-updated install, with a
+  // button that loads it and refreshes this page; or on GitHub, with a link to how to update
+  const HOW_TO_UPDATE = 'https://github.com/james-csy/acme-extension#updating';
+  function showNotice(notice) {
+    if (!host) return;
+    els.notice.hidden = !notice;
+    els.tab.classList.toggle('has-update', Boolean(notice));
+    els.tab.title = notice ? `Show message templates (update: v${notice.version})` : 'Show message templates';
+    if (!notice) return;
+    const ready = notice.kind === 'ready';
+    const action = el('button', {
+      type: 'button',
+      textContent: ready ? 'Update' : 'How to update',
+      title: ready ? 'Loads the new version and refreshes this page' : 'Opens the update steps on GitHub',
+    });
+    action.addEventListener('click', () => {
+      if (ready) chrome.runtime.sendMessage({ type: 'apply-update' });
+      else open(HOW_TO_UPDATE, '_blank', 'noopener');
+    });
+    els.notice.replaceChildren(
+      el('span', { textContent: ready ? `Update ready: v${notice.version}` : `v${notice.version} is available` }),
+      action
+    );
   }
 
   function applyState() {
@@ -467,8 +512,9 @@
     place();
   }
 
-  chrome.storage.onChanged.addListener((_changes, area) => {
+  chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync' && host) loadTemplates();
+    if (area === 'local' && 'notice' in changes) showNotice(changes.notice.newValue);
   });
 
   // `root` is for the test page, which can't otherwise see inside the closed shadow root

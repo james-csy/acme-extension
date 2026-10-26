@@ -1,5 +1,6 @@
 // Toolbar popup: see and switch the default template for each auto-fill type, turn auto-fill
-// on or off, open the editor, and save the current LinkedIn page for debugging.
+// on or off, open the editor, save the current LinkedIn page for debugging, and update the
+// extension (the daily check is in background.js).
 
 const defaultsEl = document.getElementById('defaults');
 const messageCount = document.getElementById('message-count');
@@ -76,4 +77,50 @@ document.getElementById('capture').addEventListener('click', async () => {
     : 'Open a LinkedIn tab (and refresh it once after installing), then try again.';
 });
 
+// ---- Updates -----------------------------------------------------------------
+// The checks are in background.js. An auto-updated install says when a newer version has been
+// copied into its folder; any other says when GitHub has a newer one, and how to get it.
+
+const current = chrome.runtime.getManifest().version;
+const checkLink = document.getElementById('check-update');
+document.getElementById('version').textContent = `v${current}`;
+
+function showUpdate(result) {
+  if (!result) return;
+  document.getElementById('installed').hidden = !result.installed;
+  document.getElementById('installed-version').textContent = result.installed || '';
+  const latest = !result.auto && result.latest && result.latest !== current ? result.latest : null;
+  document.getElementById('update').hidden = !latest;
+  document.getElementById('update-version').textContent = latest || '';
+  if (result.auto) checkLink.textContent = 'Auto-updates on';
+}
+
+async function checkForUpdates(manual) {
+  if (manual) {
+    status.className = 'status';
+    status.textContent = 'Checking…';
+  }
+  const result = await chrome.runtime.sendMessage({ type: 'check-update', force: manual });
+  showUpdate(result);
+  if (!manual) return;
+  if (result?.error) {
+    status.className = 'status error';
+    status.textContent = `Couldn't check for updates: ${result.error}`;
+  } else {
+    status.textContent = result?.installed || result?.latest ? '' : `You're up to date (v${current})`;
+  }
+}
+
+document.getElementById('download').addEventListener('click', async () => {
+  const { update } = await chrome.storage.local.get('update');
+  chrome.tabs.create({ url: update.download });
+});
+checkLink.addEventListener('click', () => checkForUpdates(true));
+
+// Loads the folder's files again; open LinkedIn tabs then need a refresh to use them (not done for
+// you, so nothing half-typed is lost)
+const reload = () => chrome.runtime.reload();
+['reload', 'reload-update', 'reload-installed'].forEach((id) => document.getElementById(id).addEventListener('click', reload));
+
+checkForUpdates(false);
 render();

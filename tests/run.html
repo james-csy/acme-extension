@@ -30,7 +30,7 @@
       // Like Chrome, tell onChanged listeners after every write
       const changeListeners = [];
       const notify = (name, keys) =>
-        setTimeout(() => changeListeners.forEach((fn) => fn(Object.fromEntries(keys.map((k) => [k, {}])), name)));
+        setTimeout(() => changeListeners.forEach((fn) => fn(Object.fromEntries(keys.map((k) => [k, { newValue: structuredClone(store[name][k]) }])), name)));
       const area = (name) => ({
         get: async (keys) => {
           if (keys === null) return structuredClone(store[name]);
@@ -48,6 +48,7 @@
       });
       let closedRoot = null; // set when a test creates a closed shadow root
       const messageListeners = [];
+      const sent = [];
       window.chrome = {
         storage: { sync: area('sync'), local: area('local'), onChanged: { addListener: (fn) => changeListeners.push(fn) } },
         dom: {
@@ -57,7 +58,8 @@
             return el.id === 'interop-outlet' ? closedRoot : null;
           },
         },
-        runtime: { id: "test", onMessage: { addListener: (fn) => messageListeners.push(fn) }, sendMessage() {} },
+        // Messages to the background page are recorded in `sent`
+        runtime: { id: "test", onMessage: { addListener: (fn) => messageListeners.push(fn) }, sendMessage: async (m) => { sent.push(m); } },
       };
     </script>
     <script src="../src/core/namespace.js"></script>
@@ -549,6 +551,19 @@
       } else {
         results.push({ name: 'panel: rich editor insert at cursor -- SKIPPED, click into this window and reload', pass: true });
       }
+
+      // A newer version: the panel says so, with a button that loads it (background.js does the rest)
+      expect('panel: asks for an update check when it opens', sent.some((m) => m.type === 'check-update'), true);
+      await chrome.storage.local.set({ notice: { kind: 'ready', version: '9.9.9' } });
+      await wait(100);
+      const notice = CN.panel.root.querySelector('.notice');
+      expect('panel: update ready shown', [notice.hidden, notice.querySelector('span').textContent], [false, 'Update ready: v9.9.9']);
+      notice.querySelector('button').click();
+      expect('panel: Update asks to load the new version', sent.at(-1), { type: 'apply-update' });
+      expect('panel: minimized button marked too', CN.panel.root.querySelector('.tab').classList.contains('has-update'), true);
+      await chrome.storage.local.set({ notice: null });
+      await wait(100);
+      expect('panel: notice gone once up to date', [notice.hidden, CN.panel.root.querySelector('.tab').classList.contains('has-update')], [true, false]);
 
       // Sales Navigator: a message to a connection (the compose window with no subject line) and
       // the inbox use the panel; an InMail doesn't

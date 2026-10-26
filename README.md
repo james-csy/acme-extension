@@ -2,42 +2,89 @@
 
 Chrome extension that fills your saved templates into LinkedIn message boxes. It never clicks Send.
 
-## Install
+## Install (Mac)
 
-It isn't in the Chrome Web Store, so it's loaded as an "unpacked" extension. Takes about a minute.
+Takes about two minutes. After this it keeps itself up to date.
 
-1. **Get the files.** Either unzip the `linkedin-connect-note-<version>.zip` you were sent, or on
-   GitHub click **Code → Download ZIP** and unzip that. Put the folder somewhere it can stay (e.g.
-   Documents): Chrome loads it from there every time, so don't delete or move it afterwards.
-2. In Chrome, go to `chrome://extensions` (paste it into the address bar).
-3. Turn on **Developer mode** (switch in the top-right corner).
-4. Click **Load unpacked** and choose the unzipped folder: the one with `manifest.json` directly
-   inside it.
-5. Pin it: click the puzzle-piece icon next to the address bar, then the pin next to
+1. **Open Terminal:** press **⌘ Space**, type `Terminal`, press **Return**.
+2. **Paste this line and press Return:**
+   ```
+   curl -fsSL https://raw.githubusercontent.com/james-csy/acme-extension/main/install/install.sh | bash
+   ```
+   It puts the extension in a **ConnectNote** folder in your home folder and opens it. macOS may
+   show a "Background Items Added" notice: that's the part that downloads updates. Leave it on.
+3. **In your browser** (Chrome, Dia, Arc or Brave), go to `chrome://extensions` and turn on
+   **Developer mode** (switch in the top-right corner).
+4. Click **Load unpacked**, press **⌘ Shift H** to jump to your home folder, choose **ConnectNote**
+   and click **Select**.
+5. **Pin it:** click the puzzle-piece icon next to the address bar, then the pin next to
    **LinkedIn Connect Note**.
 6. **Refresh any LinkedIn tabs** that were already open.
-7. Click the extension's icon → **Edit templates** and create your first connection note. The first
-   one of each type becomes its default, which is what gets filled in automatically.
+7. Click the extension's icon → **Edit templates** and create your first templates. The first
+   connection note becomes the default, which is what gets filled in automatically.
 
 Then click **Connect → Add a note** on LinkedIn: the note fills in by itself. Check it, then send.
-It never clicks Send for you.
+It never clicks Send for you. In messages, pick a template from the panel next to the message box.
 
-**Updating:** replace the folder's contents with the new version, click the reload arrow on the
-extension's card in `chrome://extensions`, then refresh LinkedIn. Your templates are kept: they're
-saved in your Chrome profile, not in the folder.
+Don't move or rename the ConnectNote folder: the browser loads the extension from there, and
+updates are delivered there. Your templates are saved in your browser profile, not in the folder.
 
-**If nothing fills in:** refresh the LinkedIn tab, and check in the popup that auto-fill is on and a
-default connection note is chosen. Still nothing: open DevTools (⌥⌘J / Ctrl+Shift+J), filter the
-Console for `Connect Note`, and send what it says along with a capture from popup →
-**Save this page for debugging**.
+The browser may show a "Disable developer mode extensions" notice at startup; close it to keep the
+extension on.
 
-Chrome may show a "Disable developer mode extensions" notice at startup; click away from it to
-keep the extension on.
+### Updating
+
+Nothing to do. A few times a day your Mac checks for a new version and downloads it into the
+ConnectNote folder. Then either:
+
+- the template panel on LinkedIn shows **Update ready** → click **Update** (the page refreshes), or
+- it switches over by itself the next time you have no LinkedIn tabs open.
+
+Installed without the Terminal step (from a zip, on Windows)? The panel says when a new version is
+out. Download it from [Releases](https://github.com/james-csy/acme-extension/releases/latest),
+copy its files over your extension folder, then click the extension's icon → **Reload** and refresh
+LinkedIn.
+
+### Uninstall
+
+```
+curl -fsSL https://raw.githubusercontent.com/james-csy/acme-extension/main/install/uninstall.sh | bash
+```
+
+Then click **Remove** on the extension in `chrome://extensions` (this also deletes your templates;
+use **Export** in the editor first to keep them).
+
+### If nothing fills in
+
+Refresh the LinkedIn tab, and check in the popup that auto-fill is on and a default connection note
+is chosen. Still nothing: open DevTools (⌥⌘J), filter the Console for `Connect Note`, and send what
+it says along with a capture from popup → **Save this page for debugging**.
+
+## Releasing
+
+Installed copies follow the latest [GitHub release](https://github.com/james-csy/acme-extension/releases),
+not the `main` branch, so pushing to `main` ships nothing. To ship:
+
+```
+scripts/release.sh 0.12.1 "Short note on what changed"
+```
+
+It sets the version in `manifest.json`, commits, tags `v0.12.1`, pushes, and publishes the release
+(needs the GitHub CLI, `gh`, logged in). Each installed copy's updater
+(`~/Library/Application Support/ConnectNote/update.sh`, run by launchd at login and every 6 hours)
+downloads it, and the extension switches over as described in [Updating](#updating). Versions only
+go up: to undo a release, release the old code with a higher version. The repo must stay public,
+since the updater downloads without signing in.
 
 ## Developing
 
-After changing any file, click the reload arrow on the extension's card and refresh LinkedIn.
-To package a build to send someone: `zip -r linkedin-connect-note-<version>.zip manifest.json src icons`.
+Work in your git checkout, loaded as a separate unpacked extension (turn off your installed copy
+meanwhile, or both fill the same boxes). After changing any file, click the reload arrow on the
+extension's card and refresh LinkedIn.
+
+To try the updater without publishing, point it at a local zip:
+`CONNECT_NOTE_TAG=v0.12.1 CONNECT_NOTE_ZIP=file:///path/to/zip bash ~/Library/Application\ Support/ConnectNote/update.sh`
+(the zip's manifest must say 0.12.1). Its log is `update.log` next to it.
 
 ## Templates
 
@@ -80,7 +127,9 @@ src/adapters/            one file per LinkedIn box
   connect-note.js        regular LinkedIn "Add a note to your invitation"
   sales-nav.js           Sales Navigator Connect note, InMail, messages and inbox
   messaging.js           regular LinkedIn messaging (panel, not auto-fill)
-src/background.js        opens the editor page when the panel asks
+src/background.js        opens the editor page when the panel asks; update checks and reloading
+install/                 Mac installer, updater (run by launchd) and uninstaller
+scripts/release.sh       publishes a release
 icons/                   extension icon: icon.svg (48/128 px) and icon-small.svg (16/32 px), plus PNGs
 src/options/             the template editor page
 src/popup/               the toolbar popup
