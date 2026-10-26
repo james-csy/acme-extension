@@ -142,7 +142,7 @@
 
   function build() {
     host = document.createElement('connect-note-panel');
-    Object.assign(host.style, { position: 'fixed', left: '0', top: '0', zIndex: '2147483000' });
+    Object.assign(host.style, { position: 'fixed', left: '0', top: '0', zIndex: '2147483000', transition: 'none' });
     shadow = host.attachShadow({ mode: 'closed' });
     shadow.append(el('style', { textContent: STYLE }));
 
@@ -247,17 +247,47 @@
     return { left: rect.left + offset.left, right: rect.right + offset.left, top: rect.top + offset.top, bottom: rect.bottom + offset.top };
   }
 
-  // Where the panel was dragged to, else beside the message box with their bottoms lined up: to
+  // The chat the panel sits beside: the message box of the chat in use, kept until another chat's
+  // message box takes over. Clicking into a comment or search box doesn't move it. Going to another
+  // chat (clicking into it, opening it, or the old one closing) glides it over there. When the
+  // chat's box is only hidden, e.g. while LinkedIn redraws it, another chat that happens to be the
+  // only one on screen takes over only after a while.
+  const HIDDEN_FOR_MS = 1500;
+  let anchor = null;
+  let anchorHiddenSince = 0;
+  let placed = false;
+  const isShown = (el) => Boolean(el?.isConnected && el.getClientRects().length);
+  function updateAnchor(box) {
+    anchorHiddenSince = isShown(anchor) ? 0 : anchorHiddenSince || Date.now();
+    if (!box || box === anchor || !CN.messageBoxes().includes(box)) return;
+    const picked = box === CN.chosenBox();
+    if (!picked && anchor?.isConnected && (!anchorHiddenSince || Date.now() - anchorHiddenSince < HIDDEN_FOR_MS)) return;
+    if (placed && !state.pos) glide();
+    anchor = box;
+  }
+  function glide() {
+    host.style.transition = 'left .25s cubic-bezier(.2,.8,.2,1), top .25s cubic-bezier(.2,.8,.2,1)';
+    clearTimeout(glide.timer);
+    // 'none', not '': ends the glide even where it didn't run, e.g. in a background tab
+    glide.timer = setTimeout(() => (host.style.transition = 'none'), 300);
+  }
+
+  // Where the panel was dragged to, else beside the chat's message box with their bottoms lined up: to
   // its right if there's room (on the messaging page, over the right-hand column), else to its
-  // left (a pop-up chat in the corner), else just above it. Kept inside the window.
+  // left (a pop-up chat in the corner), else just above it. With no chat on screen for now, it
+  // stays where it is. Kept inside the window.
   function place() {
     if (!host) return;
     const { width, height } = host.getBoundingClientRect();
     let left = innerWidth - width - 16;
     let top = 96;
     let origin = 'top right';
-    const box = contextBox?.isConnected && contextBox.getClientRects().length ? boxRect(contextBox) : null;
-    if (state.pos) {
+    const box = isShown(anchor) ? boxRect(anchor) : null;
+    if (placed && !state.pos && !box) {
+      left = parseFloat(host.style.left);
+      top = parseFloat(host.style.top);
+      origin = els.panel.style.transformOrigin || origin;
+    } else if (state.pos) {
       ({ left, top } = state.pos);
       origin = 'top left';
     } else if (box) {
@@ -277,6 +307,7 @@
     top = Math.max(MARGIN, Math.min(top, innerHeight - height - MARGIN));
     host.style.left = `${Math.round(left)}px`;
     host.style.top = `${Math.round(top)}px`;
+    placed = true;
   }
 
   // The box moves when the page scrolls or the window is resized; follow it once per frame
@@ -332,6 +363,7 @@
       const move = (e) => {
         if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 4) return;
         moved = true;
+        host.style.transition = 'none';
         state.pos = { left: start.left + e.clientX - startX, top: start.top + e.clientY - startY };
         els.attach.hidden = false;
         place();
@@ -378,6 +410,7 @@
     if (!force && !moved && box === contextBox && Date.now() - contextCheckedAt < CONTEXT_REFRESH_MS) return;
     const boxChanged = box !== contextBox;
     contextBox = box;
+    updateAnchor(box);
     contextHref = location.href;
     contextCheckedAt = Date.now();
     // No variables for this type means nothing about the recipient is used or shown

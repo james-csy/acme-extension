@@ -97,19 +97,26 @@
     shownBefore = new Set(shown);
   }
 
+  // The box the person picked: the focused text box, else the last one used (or just opened) while
+  // it's still on screen. Null when targetBox has to work it out.
+  function chosenBox() {
+    const focused = deepActiveElement();
+    if (isTextBox(focused) && !CN.isPanelNode?.(focused)) return focused;
+    return lastBox && isShown(lastBox) ? lastBox : null;
+  }
+
   // The box to insert into: the focused text box, else the last one used (or just opened) while
   // it's still on screen, else the page's message box found without a click. Switching chats can
   // swap in a new box, so the open conversation's box is found again: the only visible one, or
   // with pop-up chats open too, the one in the page's main conversation.
   function targetBox() {
-    const focused = deepActiveElement();
-    if (isTextBox(focused) && !CN.isPanelNode?.(focused)) return focused;
-    if (lastBox && isShown(lastBox)) return lastBox;
+    const chosen = chosenBox();
+    if (chosen) return chosen;
     const boxes = messageBoxes();
     if (boxes.length === 1) return boxes[0];
     const inConversation = boxes.filter((el) => el.closest('main, .msg__detail, .scaffold-layout__detail'));
     return inConversation.length === 1 ? inConversation[0] : null;
   }
 
-  Object.assign(CN, { trackFocus, targetBox, messageBoxes });
+  Object.assign(CN, { trackFocus, targetBox, chosenBox, messageBoxes });
 })();

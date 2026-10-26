@@ -505,6 +505,23 @@
         await wait(100);
         expect('panel: put back beside the message box', [besideBox(), attach.hidden], [true, true]);
 
+        // Clicking into another kind of box (a comment) or the chat's box vanishing for a moment
+        // leaves it beside the chat
+        const commentBox = document.createElement('textarea');
+        commentBox.setAttribute('aria-label', 'Add a comment…');
+        host.append(commentBox);
+        commentBox.focus();
+        await wait(1500);
+        expect('panel: stays beside the chat when another box is clicked', besideBox(), true);
+        commentBox.remove();
+        const before2 = panelRect();
+        mainBox.style.display = 'none';
+        await wait(700);
+        expect('panel: stays put while the chat redraws', [Math.round(panelRect().left), Math.round(panelRect().top)],
+          [Math.round(before2.left), Math.round(before2.top)]);
+        mainBox.style.display = '';
+        await wait(1500);
+
         // Minimized: a chat-bubble button beside the box, which can be dragged without opening
         // (Waits allow for a background tab, where Chrome runs timers at most once a second)
         CN.panel.root.querySelector('[aria-label="Collapse panel"]').click();
