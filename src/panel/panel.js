@@ -1,6 +1,6 @@
 // The template panel, on pages with a pick-from-list box (LinkedIn messaging). It sits beside the
-// message box it inserts into and follows it; dragged somewhere else, it stays there until it's
-// put back. Clicking a template inserts it at the cursor in the message box you last typed in.
+// chat in use and follows it; dragged somewhere else, it stays there until it's put back or another
+// chat is used. Clicking a template inserts it at the cursor in the message box you last typed in.
 // It lives in a closed shadow root so LinkedIn's styles and ours can't affect each other.
 (() => {
   if (window !== window.top) return; // one panel per tab, in the main page
@@ -15,7 +15,8 @@
   let els = {};
   let adapter = null;
   let templates = [];
-  // `pos` is where the panel was dragged to ({ left, top }), or null to sit beside the message box
+  // `pos` is where the panel was dragged to ({ left, top }), or null to sit beside the chat. A drag
+  // lasts while that chat is in use: going to another chat, or reloading, puts it back beside one.
   let state = { collapsed: false, pos: null };
   let context = {};
   let contextBox = null;
@@ -262,8 +263,13 @@
     if (!box || box === anchor || !CN.messageBoxes().includes(box)) return;
     const picked = box === CN.chosenBox();
     if (!picked && anchor?.isConnected && (!anchorHiddenSince || Date.now() - anchorHiddenSince < HIDDEN_FOR_MS)) return;
-    if (placed && !state.pos) glide();
+    if (placed) glide();
     anchor = box;
+    // Another chat: back beside it, wherever the panel was dragged to
+    if (state.pos) {
+      state.pos = null;
+      els.attach.hidden = true;
+    }
   }
   function glide() {
     host.style.transition = 'left .25s cubic-bezier(.2,.8,.2,1), top .25s cubic-bezier(.2,.8,.2,1)';
@@ -323,8 +329,9 @@
   addEventListener('resize', schedulePlace);
   addEventListener('scroll', schedulePlace, true);
 
+  // Only whether it's minimized is kept across pages
   function saveState() {
-    chrome.storage.local.set({ [STATE_KEY]: state });
+    chrome.storage.local.set({ [STATE_KEY]: { collapsed: state.collapsed } });
   }
 
   // Minimizing shrinks the panel into the corner the button then appears in (the one nearest the
@@ -533,7 +540,7 @@
     if (!host && !starting) {
       starting = true;
       adapter = active;
-      state = { ...state, ...(await chrome.storage.local.get(STATE_KEY))[STATE_KEY] };
+      state = { ...state, collapsed: Boolean((await chrome.storage.local.get(STATE_KEY))[STATE_KEY]?.collapsed), pos: null };
       build();
       await loadTemplates();
       starting = false;

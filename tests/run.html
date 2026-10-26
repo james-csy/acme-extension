@@ -522,6 +522,7 @@
         mainBox.style.display = '';
         await wait(1500);
 
+
         // Minimized: a chat-bubble button beside the box, which can be dragged without opening
         // (Waits allow for a background tab, where Chrome runs timers at most once a second)
         CN.panel.root.querySelector('[aria-label="Collapse panel"]').click();
@@ -542,6 +543,19 @@
         expect('panel: clicking the button opens it again', CN.panel.root.querySelector('.panel').hidden, false);
         attach.click();
         await wait(100);
+
+        // Dragged, then another chat: back beside the new chat
+        const at = panelRect();
+        CN.panel.root.querySelector('.head').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: at.left + 20, clientY: at.top + 10 }));
+        dispatchEvent(new MouseEvent('mousemove', { clientX: at.left + 20, clientY: at.top + 60 }));
+        dispatchEvent(new MouseEvent('mouseup', {}));
+        showThread('Kim Tran');
+        closedRoot.querySelector('main [contenteditable]').style.width = '200px';
+        history.pushState({}, '', '/messaging/thread/three/');
+        await wait(1500);
+        const kimBox = closedRoot.querySelector('main [contenteditable]').getBoundingClientRect();
+        expect('panel: a drag lasts until another chat is used',
+          [Math.abs(panelRect().left - (kimBox.right + 12)) <= 1, attach.hidden, CN.panel.root.querySelector('.to').textContent], [true, true, 'To: Kim Tran']);
       } else {
         results.push({ name: 'panel: position checks -- SKIPPED, window narrower than 540px', pass: true });
       }
