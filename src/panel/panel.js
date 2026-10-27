@@ -1,6 +1,10 @@
-// The template panel, on pages with a pick-from-list box (LinkedIn messaging). It sits beside the
-// chat in use and follows it; dragged somewhere else, it stays there until it's put back or another
-// chat is used. Clicking a template inserts it at the cursor in the message box you last typed in.
+// The template panel. On pages with a pick-from-list box (LinkedIn messaging, Sales Navigator's
+// inbox) it sits beside the chat in use and follows it; it also appears beside any other text box
+// you click into (a free message, a connection note, a box LinkedIn added since). Open or
+// minimized to a small button, it stays that way across boxes and pages. Dragged somewhere else, it stays there until it's put
+// back or another chat is used. Clicking a template inserts it at the cursor in the box you last
+// typed in, and an InMail's subject into the box's subject line if it has one. It shows who the
+// text is for (name, company, title, each editable) and where a guess came from.
 // It lives in a closed shadow root so LinkedIn's styles and ours can't affect each other.
 (() => {
   if (window !== window.top) return; // one panel per tab, in the main page
@@ -8,12 +12,15 @@
   const STATE_KEY = 'panelState';
   const CONTEXT_REFRESH_MS = 1000;
   const GAP = 12; // between the panel and the message box
+  const TAB_GAP = 8; // between the minimized button and the box
   const MARGIN = 8; // kept from the window's edges
 
   let host = null;
   let shadow = null;
   let els = {};
+  // The page's pick-from-list adapter, or null beside some other text box ("any box" mode)
   let adapter = null;
+  let anyBox = false;
   let templates = [];
   // `pos` is where the panel was dragged to ({ left, top }), or null to sit beside the chat. A drag
   // lasts while that chat is in use: going to another chat, or reloading, puts it back beside one.
@@ -58,15 +65,20 @@
     }
     .search input:focus { border-color: var(--accent); }
     .to { margin: 0 12px 6px; font-size: 12px; color: var(--muted); }
-    .to b { color: var(--text); font-weight: 600; }
-    .company { display: flex; align-items: center; gap: 8px; margin: 0 12px 8px; font-size: 12px; color: var(--muted); }
-    .company input {
-      flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); padding: 4px 8px;
+    .fields { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; margin: 0 12px 8px; font-size: 12px; color: var(--muted); }
+    .field { display: contents; }
+    .field .value { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .field input {
+      flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); padding: 3px 8px;
       border: 1px solid var(--border); border-radius: 6px; outline: none;
     }
-    .company input:focus { border-color: var(--accent); }
-    .company .guess { flex: none; font-size: 11px; color: var(--muted); font-style: italic; }
+    .field input:focus { border-color: var(--accent); }
+    .field input:placeholder-shown { border-style: dashed; }
+    .field .guess { flex: none; font-size: 11px; color: var(--muted); font-style: italic; }
     .list { overflow-y: auto; padding: 0 6px 6px; }
+    .group { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 8px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    .group .chev { transition: transform .15s; }
+    .group[aria-expanded="false"] .chev { transform: rotate(-90deg); }
     .item { display: flex; align-items: flex-start; gap: 6px; width: 100%; padding: 8px; border-radius: 8px; text-align: left; cursor: pointer; }
     .item:hover, .item:focus-visible { background: var(--hover); }
     .insert { flex: none; align-self: center; font-size: 12px; font-weight: 600; color: var(--accent); opacity: 0; }
@@ -84,15 +96,16 @@
     .link { color: var(--accent); font-weight: 600; }
     .status { font-size: 12px; color: var(--muted); min-height: 16px; flex: 1; text-align: right; }
     .status.warn { color: var(--danger); }
-    /* Minimized: the panel's card shrunk to its icon, in the accent colour so it stands out on the page */
+    /* Minimized: the panel's card shrunk to its icon, in the accent colour with a soft glow so it's
+       easy to spot */
     .tab {
-      display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0;
-      background: var(--accent); color: var(--bg); border: none; border-radius: 12px;
-      box-shadow: 0 6px 18px rgba(10,102,194,.35), 0 2px 6px rgba(0,0,0,.15);
+      display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0;
+      background: var(--accent); color: var(--bg); border: none; border-radius: 10px;
+      box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 2px 10px rgba(10,102,194,.35);
       transition: filter .15s, transform .15s, box-shadow .15s;
     }
-    .tab:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 10px 24px rgba(10,102,194,.4), 0 2px 6px rgba(0,0,0,.15); }
-    .tab .svg svg { width: 20px; height: 20px; stroke-width: 1.5; }
+    .tab:hover, .tab:focus-visible { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 4px 16px rgba(10,102,194,.5); }
+    .tab .svg svg { width: 16px; height: 16px; stroke-width: 1.5; }
     /* A newer version: a dot on the minimized button, a strip under the header */
     .tab { position: relative; }
     .tab.has-update::after {
@@ -119,6 +132,7 @@
     attach: '<path d="M8 2.5v7M5 6.5l3 3 3-3"/><path d="M3 13h10"/>',
     chat: '<path d="M2.5 3.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H7.2L4.5 13.3V11h-1a1 1 0 0 1-1-1Z"/><path d="M5.2 5.6h5.6M5.2 8h3.6"/>',
     copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5"/>',
+    chevron: '<path d="M4.5 6.5 8 10l3.5-3.5"/>',
   };
   function icon(name) {
     const span = document.createElement('span');
@@ -150,7 +164,7 @@
 
     els.wrap = el('div', { className: `wrap${isDarkPage() ? ' dark' : ''}` });
     // Minimized: a chat-bubble button beside the message box; click to open, drag to move
-    els.tab = iconButton('chat', 'Show message templates', () => setCollapsed(false));
+    els.tab = iconButton('chat', 'Show templates', () => setCollapsed(false));
     els.tab.className = 'tab';
     enableDragging(els.tab);
 
@@ -170,20 +184,26 @@
     els.search = el('input', { type: 'search', placeholder: 'Filter templates' });
     els.search.setAttribute('aria-label', 'Filter templates');
     els.search.addEventListener('input', render);
+    // Only before there's a box to insert into
     els.to = el('p', { className: 'to' });
-    // Their company, when it's been remembered; typing it here remembers it for next time
-    els.company = el('input', { type: 'text', placeholder: 'Not known yet, type it to use it' });
-    els.company.setAttribute('aria-label', "Recipient's company");
-    els.company.addEventListener('input', () => {
-      context = { ...context, company: els.company.value.trim() || null, companySource: 'typed' };
-      typedCompanies.set(personKey(context), context.company);
-      CN.rememberPerson({ ids: context.ids, fullName: context.fullName, company: context.company, title: context.title, source: 'typed' });
-      els.companyGuess.hidden = true;
-      renderList();
-    });
-    // A company read from their headline is a guess: say so, so it gets a look before sending
-    els.companyGuess = el('span', { className: 'guess', textContent: 'from headline', title: 'Read from their LinkedIn headline. Check it, or type the right one.' });
-    els.companyRow = el('label', { className: 'company' }, 'Company', els.company, els.companyGuess);
+    // What's known about who it's for, each editable. A typed name is used for this box only; a
+    // typed company or title is also remembered for next time.
+    els.fields = el('div', { className: 'fields' });
+    els.inputs = {};
+    els.guesses = {};
+    for (const [key, label, placeholder] of [
+      ['fullName', 'To', 'Not found, so {name} is "there"'],
+      ['company', 'Company', 'Not found, type it to use it'],
+      ['title', 'Title', 'Not found, type it to use it'],
+    ]) {
+      const input = el('input', { type: 'text', placeholder });
+      input.setAttribute('aria-label', `Recipient's ${key === 'fullName' ? 'name' : key}`);
+      input.addEventListener('input', () => onTyped(key, input.value.trim() || null));
+      const guess = el('span', { className: 'guess', hidden: true });
+      els.inputs[key] = input;
+      els.guesses[key] = guess;
+      els.fields.append(el('label', { className: `field ${key}` }, el('span', { textContent: label }), el('span', { className: 'value' }, input, guess)));
+    }
     els.list = el('div', { className: 'list' });
     const create = el('button', { className: 'link', type: 'button', textContent: '+ New template' });
     create.addEventListener('click', openEditor);
@@ -196,7 +216,7 @@
       els.notice,
       el('div', { className: 'search' }, els.search),
       els.to,
-      els.companyRow,
+      els.fields,
       els.list,
       el('div', { className: 'foot' }, create, els.status)
     );
@@ -217,7 +237,7 @@
     if (!host) return;
     els.notice.hidden = !notice;
     els.tab.classList.toggle('has-update', Boolean(notice));
-    els.tab.title = notice ? `Show message templates (update: v${notice.version})` : 'Show message templates';
+    els.tab.title = notice ? `Show templates (update: v${notice.version})` : 'Show templates';
     if (!notice) return;
     const ready = notice.kind === 'ready';
     const action = el('button', {
@@ -235,18 +255,37 @@
     );
   }
 
+  let shownCollapsed = null;
   function applyState() {
+    shownCollapsed = state.collapsed;
     els.attach.hidden = !state.pos;
-    els.tab.hidden = !state.collapsed;
-    els.panel.hidden = state.collapsed;
-    els.panel.style.display = state.collapsed ? 'none' : '';
-    els.tab.style.display = state.collapsed ? '' : 'none';
+    els.tab.hidden = !shownCollapsed;
+    els.panel.hidden = shownCollapsed;
+    els.panel.style.display = shownCollapsed ? 'none' : '';
+    els.tab.style.display = shownCollapsed ? '' : 'none';
     place();
+  }
+
+  // What looks like the box on screen: the text area is often only part of it, with the emoji, GIF
+  // or Send buttons beside or under it inside one bordered outline. The outermost bordered element
+  // around the text area that's only a little bigger than it, else the text area itself.
+  function visibleBox(box) {
+    const own = box.getBoundingClientRect();
+    let outline = box;
+    let node = box.parentElement;
+    for (let depth = 0; node && depth < 6; depth += 1, node = node.parentElement) {
+      const rect = node.getBoundingClientRect();
+      if (rect.height > own.height + 72 || rect.width > own.width + 240) break;
+      const style = getComputedStyle(node);
+      const bordered = ['Top', 'Right', 'Bottom', 'Left'].some((side) => parseFloat(style[`border${side}Width`]) > 0 && style[`border${side}Style`] !== 'none');
+      if (bordered || style.boxShadow !== 'none') outline = node;
+    }
+    return outline;
   }
 
   // The box's position in the main page, also for a box inside a same-origin frame
   function boxRect(box) {
-    const rect = box.getBoundingClientRect();
+    const rect = visibleBox(box).getBoundingClientRect();
     const frame = box.ownerDocument.defaultView?.frameElement;
     if (!frame) return rect;
     const offset = frame.getBoundingClientRect();
@@ -263,10 +302,14 @@
   let anchorHiddenSince = 0;
   let placed = false;
   const isShown = (el) => Boolean(el?.isConnected && el.getClientRects().length);
+  // Any other box (a comment, a free message, a connection note) takes it only while no chat's box
+  // is on screen.
   function updateAnchor(box) {
     anchorHiddenSince = isShown(anchor) ? 0 : anchorHiddenSince || Date.now();
-    if (!box || box === anchor || !CN.messageBoxes().includes(box)) return;
+    if (!box || box === anchor) return;
+    const chats = CN.messageBoxes();
     const picked = box === CN.chosenBox();
+    if (!chats.includes(box) && !(picked && !(isShown(anchor) && chats.includes(anchor)))) return;
     if (!picked && anchor?.isConnected && (!anchorHiddenSince || Date.now() - anchorHiddenSince < HIDDEN_FOR_MS)) return;
     if (placed) glide();
     anchor = box;
@@ -301,6 +344,14 @@
     } else if (state.pos) {
       ({ left, top } = state.pos);
       origin = 'top left';
+    } else if (box && shownCollapsed) {
+      // The button: just outside the box's right edge, in line with a short box (a comment) or its
+      // bottom (a chat); else outside its left edge; else above its right corner. Never on the box.
+      top = box.bottom - box.top < 80 ? (box.top + box.bottom - height) / 2 : box.bottom - height;
+      origin = 'center left';
+      if (box.right + TAB_GAP + width <= innerWidth - MARGIN) left = box.right + TAB_GAP;
+      else if (box.left - TAB_GAP - width >= MARGIN) [left, origin] = [box.left - TAB_GAP - width, 'center right'];
+      else [left, top, origin] = [box.right - width, box.top - TAB_GAP - height, 'bottom right'];
     } else if (box) {
       top = box.bottom - height;
       origin = 'bottom right';
@@ -314,6 +365,9 @@
       }
     }
     els.panel.style.transformOrigin = els.tab.style.transformOrigin = origin;
+    // Beside a box that isn't a chat, scrolled out of view (a comment box up the feed): out of the
+    // way until it's back
+    host.style.visibility = anyBox && !state.pos && box && (box.bottom < 0 || box.top > innerHeight) ? 'hidden' : '';
     left = Math.max(MARGIN, Math.min(left, innerWidth - width - MARGIN));
     top = Math.max(MARGIN, Math.min(top, innerHeight - height - MARGIN));
     host.style.left = `${Math.round(left)}px`;
@@ -408,18 +462,47 @@
 
   // ---- Content ----------------------------------------------------------
 
+  // Every template; the ones that fit the box come first (see render)
   async function loadTemplates() {
-    templates = (await CN.listTemplates()).filter((t) => t.type === adapter.type);
+    templates = await CN.listTemplates();
     render();
   }
 
-  // Companies typed into the panel, per person: a refresh that reads storage before the typed one
-  // is saved mustn't undo it
-  const typedCompanies = new Map();
-  const personKey = (c) => `${c.fullName}|${(c.ids || []).join('|')}`;
+  // What was typed into the panel's fields, per person (or per box, when nobody was found): a
+  // refresh mustn't undo it, including one that read storage before a typed company was saved
+  const typed = new Map();
+  const boxIds = new WeakMap();
+  function personKey(c, box) {
+    if (c.fullName || c.ids?.length) return `${c.fullName}|${(c.ids || []).join('|')}`;
+    if (!box) return 'none';
+    if (!boxIds.has(box)) boxIds.set(box, Math.random());
+    return `box:${boxIds.get(box)}`;
+  }
+  let found = {}; // the context as read from the page, before typed values
 
-  // Who the message is for, refreshed when the target box or the conversation (the address)
-  // changes, and at most once a second otherwise
+  function withTyped(next) {
+    const own = typed.get(personKey(next, contextBox)) || {};
+    const result = { ...next };
+    if ('fullName' in own) Object.assign(result, { fullName: own.fullName, name: own.fullName && CN.firstNameOf(own.fullName), nameSource: 'typed' });
+    if ('company' in own) Object.assign(result, { company: own.company, companySource: 'typed' });
+    if ('title' in own) result.title = own.title;
+    return result;
+  }
+
+  function onTyped(key, value) {
+    const k = personKey(found, contextBox);
+    typed.set(k, { ...typed.get(k), [key]: value });
+    context = withTyped(found);
+    // A company or title is remembered for next time, for whoever the page says this is
+    if (key !== 'fullName' && (context.ids?.length || context.fullName)) {
+      CN.rememberPerson({ ids: context.ids, fullName: context.fullName, company: context.company, title: context.title, source: 'typed' });
+    }
+    renderFields();
+    renderList();
+  }
+
+  // Who the text is for, refreshed when the target box or the conversation (the address) changes,
+  // and at most once a second otherwise
   let contextHref = null;
   async function refreshContext(force = false) {
     const box = CN.targetBox();
@@ -430,50 +513,56 @@
     updateAnchor(box);
     contextHref = location.href;
     contextCheckedAt = Date.now();
-    // No variables for this type means nothing about the recipient is used or shown
-    if (!CN.TEMPLATE_TYPES[adapter.type].variables.length) {
-      if (boxChanged) render();
-      return;
-    }
-    let next = await adapter.getContext(box);
-    if (typedCompanies.has(personKey(next))) next = { ...next, company: typedCompanies.get(personKey(next)), companySource: 'typed' };
-    if (JSON.stringify(next) === JSON.stringify(context) && !force && !boxChanged) return;
-    context = next;
+    const next = await CN.contextForBox(box, adapter);
+    if (JSON.stringify(next) === JSON.stringify(found) && !force && !boxChanged) return;
+    found = next;
+    context = withTyped(next);
     render();
+  }
+
+  // Where a value came from, when it's a guess worth checking
+  const GUESSES = {
+    fullName: {
+      clicked: ['from button', 'From the Message or Connect button you clicked. Check it, or type the right name.'],
+      page: ['this profile', "The person whose page this is. Check it's who you're writing to."],
+    },
+    company: { headline: ['from headline', 'Read from their LinkedIn headline. Check it, or type the right one.'] },
+  };
+
+  function renderFields() {
+    for (const key of ['fullName', 'company', 'title']) {
+      // Don't overwrite what's being typed
+      if (shadow.activeElement !== els.inputs[key]) els.inputs[key].value = context[key] || '';
+      const source = key === 'fullName' ? context.nameSource : key === 'company' ? context.companySource : null;
+      const [text, tip] = GUESSES[key]?.[source] || [];
+      Object.assign(els.guesses[key], { hidden: !text, textContent: text || '', title: tip || '' });
+    }
   }
 
   function render() {
     if (!host) return;
-    els.title.textContent = `${CN.TEMPLATE_TYPES[adapter.type].label} templates`;
-    // Recipient line only when the type fills in their details; otherwise just a hint until
-    // there's a box to insert into
-    const usesRecipient = CN.TEMPLATE_TYPES[adapter.type].variables.length > 0;
-    els.to.replaceChildren(
-      ...(!contextBox
-        ? ['Click into the message box, then pick a template']
-        : !usesRecipient
-          ? []
-          : context.fullName
-            ? ['To: ', el('b', { textContent: context.fullName })]
-            : ["Couldn't find the recipient's name, so {name} will be \"there\""])
-    );
-    els.to.hidden = !els.to.childNodes.length;
-    // Only with a box to insert into, and someone or some conversation to remember it for
-    const usesCompany = CN.TEMPLATE_TYPES[adapter.type].variables.some((v) => v.key === 'company');
-    els.companyRow.hidden = !(usesCompany && contextBox && (context.ids?.length || context.fullName));
-    // Don't overwrite what's being typed
-    if (shadow.activeElement !== els.company) els.company.value = context.company || '';
-    els.companyGuess.hidden = context.companySource !== 'headline';
-
+    els.title.textContent = 'Templates';
+    els.to.textContent = contextBox ? '' : 'Click into a message box, then pick a template';
+    els.to.hidden = Boolean(contextBox);
+    els.fields.hidden = !contextBox;
+    renderFields();
     renderList();
+  }
+
+  // Template types in the order they're listed: the one that fits the box first, the others folded
+  // away under their heading until opened (or searched)
+  const opened = new Set();
+  function typeOrder() {
+    const best = contextBox ? CN.describeBox(contextBox).type : adapter?.type || 'message';
+    return [best, ...Object.keys(CN.TEMPLATE_TYPES).filter((type) => type !== best)];
   }
 
   function renderList() {
     const query = els.search.value.trim().toLowerCase();
-    const shown = templates.filter((t) => !query || `${t.title} ${t.body}`.toLowerCase().includes(query));
+    const shown = templates.filter((t) => !query || `${t.title} ${t.subject || ''} ${t.body}`.toLowerCase().includes(query));
     els.list.replaceChildren();
     if (!shown.length) {
-      const empty = el('div', { className: 'empty' }, query ? 'No matches' : 'No message templates yet. ');
+      const empty = el('div', { className: 'empty' }, query ? 'No matches' : 'No templates yet. ');
       if (!query) {
         const create = el('button', { className: 'link', type: 'button', textContent: 'Create one' });
         create.addEventListener('click', openEditor);
@@ -482,28 +571,52 @@
       els.list.append(empty);
       return;
     }
-    for (const template of shown) els.list.append(renderItem(template));
+    const groups = typeOrder()
+      .map((type) => ({ type, items: shown.filter((t) => t.type === type) }))
+      .filter((group) => group.items.length);
+    groups.forEach(({ type, items }, i) => {
+      const open = i === 0 || Boolean(query) || opened.has(type);
+      if (groups.length > 1) {
+        const heading = el('button', { className: 'group', type: 'button' }, icon('chevron'), `${CN.TEMPLATE_TYPES[type].label}s · ${items.length}`);
+        heading.firstChild.classList.add('chev');
+        heading.setAttribute('aria-expanded', String(open));
+        if (i > 0 && !query) {
+          heading.addEventListener('click', () => {
+            if (opened.has(type)) opened.delete(type);
+            else opened.add(type);
+            renderList();
+          });
+        }
+        els.list.append(heading);
+      }
+      if (open) for (const template of items) els.list.append(renderItem(template));
+    });
   }
 
   function renderItem(template) {
-    const filled = () => CN.fillForType(template.type, template.body, context);
+    const filled = (field = 'body') => CN.fillForType(template.type, template[field] || '', context);
     const copy = iconButton('copy', 'Copy to clipboard');
     copy.classList.add('copy');
     const text = el(
       'span',
       { className: 'text' },
       el('span', { className: 'title', textContent: template.title }),
-      el('span', { className: 'preview', textContent: filled() })
+      el('span', { className: 'preview', textContent: template.subject ? `${filled('subject')}\n${filled()}` : filled() })
     );
     // Flag variables this type can't fill (e.g. from an older template), which would be sent as typed
-    const unsupported = CN.unsupportedVariables(template.type, template.body);
+    const unsupported = CN.unsupportedVariables(template.type, template.subject || '', template.body);
     if (unsupported.length) {
       const list = unsupported.map((k) => `{${k}}`).join(', ');
       text.append(el('span', { className: 'warn', textContent: `${list} won't be filled in` }));
     }
+    // Longer than the box takes (a connection note's 300 characters)
+    const limit = contextBox && (contextBox.maxLength > 0 ? contextBox.maxLength : CN.TEMPLATE_TYPES[CN.describeBox(contextBox).type].maxLength.body);
+    if (limit && filled().length > limit) {
+      text.append(el('span', { className: 'warn', textContent: `${filled().length} characters; this box takes ${limit}` }));
+    }
     const item = el(
       'div',
-      { className: 'item', role: 'button', tabIndex: 0, title: 'Insert at your cursor in the message box' },
+      { className: 'item', role: 'button', tabIndex: 0, title: 'Insert at your cursor in the text box' },
       text,
       el('span', { className: 'insert', textContent: 'Insert' }),
       copy
@@ -527,21 +640,28 @@
     return item;
   }
 
+  // The message goes in at the cursor; an InMail's subject goes into the box's subject line when it
+  // has one and it's still empty
   async function insert(template) {
     const box = CN.targetBox();
-    if (!box) return flash('Click into the message box first', true);
+    if (!box) return flash('Click into a text box first', true);
     await refreshContext(true);
-    CN.insertText(box, CN.fillForType(template.type, template.body, context));
-    CN.log(`[${adapter.id}] Inserted "${template.title}" for`, context.fullName || 'unknown recipient');
-    flash('Inserted');
+    const { subject } = CN.describeBox(box);
+    const fill = (text) => CN.fillForType(template.type, text, context);
+    if (template.subject?.trim() && subject && !CN.currentText(subject)) CN.fillBox(subject, fill(template.subject));
+    CN.insertText(box, fill(template.body));
+    CN.log(`[${adapter?.id || 'any-box'}] Inserted "${template.title}" for`, context.fullName || 'unknown recipient');
+    flash(template.subject?.trim() && !subject ? 'Inserted (no subject line here)' : 'Inserted');
   }
 
   // ---- Lifecycle --------------------------------------------------------
 
+  // Shown on pages with a pick-from-list box, and beside any other text box you've clicked into
+  // while it's on screen; gone otherwise
   let starting = false;
   async function update() {
     const active = CN.adapters.find((a) => CN.TEMPLATE_TYPES[a.type].mode === 'picker' && a.matches()) || null;
-    if (!active) {
+    if (!active && !CN.chosenBox()) {
       if (host) {
         host.remove();
         host = shadow = null;
@@ -549,6 +669,7 @@
       }
       return;
     }
+    anyBox = !active;
     if (!host && !starting) {
       starting = true;
       adapter = active;
@@ -558,7 +679,7 @@
       starting = false;
     } else if (host && active !== adapter) {
       adapter = active;
-      await loadTemplates();
+      render();
     }
     if (host) await refreshContext();
     place();

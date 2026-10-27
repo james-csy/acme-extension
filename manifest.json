@@ -25,6 +25,7 @@
         "src/core/fill.js",
         "src/core/storage.js",
         "src/core/focus.js",
+        "src/core/boxes.js",
         "src/core/watch.js",
         "src/core/capture.js",
         "src/panel/panel.js",

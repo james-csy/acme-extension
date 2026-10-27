@@ -71,6 +71,7 @@
     <script src="../src/core/fill.js"></script>
     <script src="../src/core/storage.js"></script>
     <script src="../src/core/focus.js"></script>
+    <script src="../src/core/boxes.js"></script>
     <script src="../src/core/watch.js"></script>
     <script src="../src/core/capture.js"></script>
     <script src="../src/panel/panel.js"></script>
@@ -414,6 +415,7 @@
       await CN.saveTemplate({ title: 'Thanks for connecting', type: 'message', body: 'Thanks for connecting!' });
       const panelHost = () => document.querySelector('connect-note-panel');
       const panelItems = () => [...CN.panel.root.querySelectorAll('.item')];
+      const toLine = () => `To: ${CN.panel.root.querySelector('.field.fullName input').value}`;
       const clickItem = (title) => {
         const item = panelItems().find((i) => i.textContent.includes(title));
         // A real click: mousedown first (the panel cancels it so focus stays in the box), then click
@@ -426,7 +428,7 @@
       history.pushState({}, '', '/messaging/thread/abc/');
       await wait(900);
       expect('panel: shown on messaging pages', Boolean(panelHost()), true);
-      expect('panel: lists message templates only, by title', panelItems().map((i) => i.querySelector('.title').textContent),
+      expect('panel: message templates first, by title, other types folded away', panelItems().map((i) => i.querySelector('.title').textContent),
         ['2nd touch', 'Thanks for connecting']);
       const oldStyle = await CN.saveTemplate({ title: 'Old {team} one', type: 'message', body: 'Hi {name}, how is it on {team}?' });
       await wait(900);
@@ -445,7 +447,7 @@
       messageBox.focus();
       messageBox.setSelectionRange(messageBox.value.length, messageBox.value.length);
       await wait(1200);
-      expect('panel: shows who the message is for', CN.panel.root.querySelector('.to').textContent, 'To: Jordan Ellis');
+      expect('panel: shows who the message is for', toLine(), 'To: Jordan Ellis');
       expect('names: recipient found near the box, own name skipped later', CN.nameNear(messageBox), 'Jordan Ellis');
       // Classic messaging page (captured Oct 2026): header link titled "Open <Name>'s profile",
       // sent messages only say "View <first name>'s profile" in hidden text
@@ -504,8 +506,8 @@
       await CN.deleteTemplate(named.id);
 
       // Company: not known for Jordan yet, typed into the panel, used, and remembered
-      const companyInput = CN.panel.root.querySelector('.company input');
-      expect('panel: company field shown, empty when not known', [companyInput.closest('label').hidden, companyInput.value], [false, '']);
+      const companyInput = CN.panel.root.querySelector('.field.company input');
+      expect('panel: company field shown, empty when not known', [CN.panel.root.querySelector('.fields').hidden, companyInput.value], [false, '']);
       const atCompany = await CN.saveTemplate({ title: 'At company', type: 'message', body: ' How is {company|your team}?' });
       await wait(900);
       companyInput.value = 'Acme';
@@ -553,11 +555,11 @@
       showThread('Sam Rivera');
       history.pushState({}, '', '/messaging/thread/one/');
       await wait(1200);
-      expect('panel: finds the open conversation without a click', CN.panel.root.querySelector('.to').textContent, 'To: Sam Rivera');
+      expect('panel: finds the open conversation without a click', toLine(), 'To: Sam Rivera');
       showThread('Priya Raman');
       history.pushState({}, '', '/messaging/thread/two/');
       await wait(1200);
-      expect('panel: follows a switch to another chat without a click', CN.panel.root.querySelector('.to').textContent, 'To: Priya Raman');
+      expect('panel: follows a switch to another chat without a click', toLine(), 'To: Priya Raman');
       clickItem('Thanks for connecting');
       await wait(200);
       expect('panel: inserts into the open conversation, not the pop-up chat',
@@ -614,9 +616,14 @@
         CN.panel.root.querySelector('[aria-label="Collapse panel"]').click();
         await wait(2500);
         const bubbleButton = CN.panel.root.querySelector('.tab');
+        // Just outside the box's right edge, centred on a short box
+        const tabBeside = (b = mainBox.getBoundingClientRect()) => {
+          const p = panelRect();
+          return Math.abs(p.left - (b.right + 8)) <= 1 && Math.abs((p.top + p.bottom) / 2 - (b.top + b.bottom) / 2) <= 1;
+        };
         expect('panel: minimizes to a chat-bubble button beside the box',
-          [CN.panel.root.querySelector('.panel').hidden, bubbleButton.getAttribute('aria-label'), Boolean(bubbleButton.querySelector('svg')), besideBox()],
-          [true, 'Show message templates', true, true]);
+          [CN.panel.root.querySelector('.panel').hidden, bubbleButton.getAttribute('aria-label'), Boolean(bubbleButton.querySelector('svg')), tabBeside()],
+          [true, 'Show templates', true, true]);
         const tabAt = panelRect();
         bubbleButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: tabAt.left + 5, clientY: tabAt.top + 5 }));
         dispatchEvent(new MouseEvent('mousemove', { clientX: tabAt.left - 25, clientY: tabAt.top - 25 }));
@@ -641,7 +648,7 @@
         await wait(1500);
         const kimBox = closedRoot.querySelector('main [contenteditable]').getBoundingClientRect();
         expect('panel: a drag lasts until another chat is used',
-          [Math.abs(panelRect().left - (kimBox.right + 12)) <= 1, attach.hidden, CN.panel.root.querySelector('.to').textContent], [true, true, 'To: Kim Tran']);
+          [Math.abs(panelRect().left - (kimBox.right + 12)) <= 1, attach.hidden, toLine()], [true, true, 'To: Kim Tran']);
       } else {
         results.push({ name: 'panel: position checks -- SKIPPED, window narrower than 540px', pass: true });
       }
@@ -711,13 +718,17 @@
       const comment = host.querySelector('#comment');
       await wait(900);
       comment.focus();
+      // A window without focus doesn't send focus events; send the one a real click would
+      comment.dispatchEvent(new FocusEvent('focusin', { bubbles: true, composed: true }));
       comment.blur();
-      expect('panel: hidden on a profile with no chat open', panelHost(), null);
+      await wait(1200);
+      expect('panel: beside a comment box clicked on a profile, open as it was left',
+        [Boolean(panelHost()), CN.panel.root?.querySelector('.panel').hidden], [true, false]);
       host.insertAdjacentHTML('beforeend', `<div class="msg-overlay-conversation-bubble">
         <h2 class="msg-overlay-bubble-header__title">Kim Tran</h2><div contenteditable="true" aria-label="Write a message…"></div></div>`);
       await wait(1500);
       expect('panel: shown when a chat pops up on a profile, for that person',
-        [Boolean(panelHost()), CN.panel.root?.querySelector('.to').textContent], [true, 'To: Kim Tran']);
+        [Boolean(panelHost()), toLine()], [true, 'To: Kim Tran']);
       clickItem('Thanks for connecting');
       await wait(200);
       expect('panel: inserts into the chat that popped up', [comment.value, host.querySelector('[contenteditable]').textContent],
@@ -731,6 +742,99 @@
       history.pushState({}, '', '/feed/');
       await wait(900);
       expect('panel: removed when leaving messaging', panelHost(), null);
+      history.back();
+      await wait(100);
+
+      // --- Any text box -------------------------------------------------------
+      // A free message to someone you're not connected to, opened with a profile's Message button:
+      // a subject line over the message box, and no name in the window. InMail templates come
+      // first and fill both; the name comes from the button that was clicked.
+      const freeIntro = await CN.saveTemplate({ title: 'Free intro', type: 'inmail', subject: 'Hi {name} from us', body: 'Hello {name}, how is {company|your team}?' });
+      await CN.rememberPerson({ fullName: 'Brett Rogers', company: 'Initrode', title: 'CFO' });
+      history.pushState({}, '', '/in/brett-r/');
+      host.innerHTML = '<button aria-label="Message Brett Rogers&nbsp; ">Message</button>';
+      host.querySelector('button').click();
+      await wait(50);
+      host.innerHTML = `<div class="compose"><input type="text" placeholder="Subject (optional)">
+        <div contenteditable="true" aria-label="Write a message…"></div></div>`;
+      const freeBody = host.querySelector('[contenteditable]');
+      await wait(600);
+      freeBody.focus();
+      await wait(1500);
+      const fieldValues = () => ['fullName', 'company', 'title'].map((k) => CN.panel.root.querySelector(`.field.${k} input`).value);
+      const guessOf = (k) => CN.panel.root.querySelector(`.field.${k} .guess`);
+      expect('any box: name from the Message button clicked, job remembered for them, marked as a guess',
+        [...fieldValues(), guessOf('fullName').hidden, guessOf('fullName').textContent], ['Brett Rogers', 'Initrode', 'CFO', false, 'from button']);
+      expect('any box: panel titled "Templates"', CN.panel.root.querySelector('h2').textContent, 'Templates');
+      expect('any box: a box with a subject line lists InMail templates first',
+        [CN.panel.root.querySelector('.group')?.textContent, panelItems()[0]?.querySelector('.title').textContent], ['InMails · 1', 'Free intro']);
+      clickItem('Free intro');
+      await wait(300);
+      expect('any box: InMail fills the subject line and the message',
+        [host.querySelector('input').value, freeBody.textContent], ['Hi Brett from us', 'Hello Brett, how is Initrode?']);
+      await CN.deleteTemplate(freeIntro.id);
+      host.innerHTML = '';
+      await wait(900);
+      history.back();
+      await wait(300);
+
+      // A comment box: the text area is only part of the bordered box, with buttons beside it. The
+      // button goes outside the whole outline, not over those buttons
+      if (innerWidth >= 540) {
+        host.innerHTML = `<div style="width:420px;border:1px solid #888;border-radius:20px;display:flex;padding:6px">
+          <div contenteditable="true" aria-label="Add a comment…" style="flex:1;min-height:24px"></div><button>GIF</button><button>📷</button></div>`;
+        const commentEditor = host.querySelector('[contenteditable]');
+        commentEditor.focus();
+        commentEditor.dispatchEvent(new FocusEvent('focusin', { bubbles: true, composed: true }));
+        await wait(1500);
+        CN.panel.root.querySelector('[aria-label="Collapse panel"]').click();
+        await wait(2500);
+        const outline = host.firstElementChild.getBoundingClientRect();
+        const tab = panelRect();
+        expect('any box: button outside the box’s outline, centred on it',
+          [Math.abs(tab.left - (outline.right + 8)) <= 1, Math.abs((tab.top + tab.bottom) / 2 - (outline.top + outline.bottom) / 2) <= 1], [true, true]);
+        commentEditor.blur();
+        host.innerHTML = '';
+        await wait(900);
+      }
+
+      // A box no adapter knows, on a profile, with nobody named near it: only the panel's button
+      // shows until it's clicked; the name is the profile's, marked so; a typed name replaces it
+      const shortNote = await CN.saveTemplate({ title: 'Short note', type: 'connection_note', body: 'Hi {name}, this is quite long' });
+      await chrome.storage.local.remove('clickedName');
+      history.pushState({}, '', '/in/dana-b/');
+      const pageTitle = document.title;
+      document.title = '(3) Dana Brooks | LinkedIn';
+      host.innerHTML = '<textarea aria-label="Add a note" maxlength="20"></textarea>';
+      const noteBox = host.querySelector('textarea');
+      noteBox.focus();
+      await wait(1500);
+      expect('any box: still minimized in the next box', [Boolean(panelHost()), CN.panel.root?.querySelector('.panel').hidden], [true, true]);
+      CN.panel.root.querySelector('.tab').click();
+      await wait(2500);
+      expect('any box: button opens it, for the profile being viewed, marked as a guess',
+        [CN.panel.root.querySelector('.panel').hidden, fieldValues()[0], guessOf('fullName').textContent], [false, 'Dana Brooks', 'this profile']);
+      const shortItem = () => panelItems().find((i) => i.textContent.includes('Short note'));
+      expect('any box: connection notes first for a note box, too long for the box flagged',
+        [CN.panel.root.querySelector('.group')?.textContent.startsWith('Connection notes'), shortItem()?.querySelector('.warn')?.textContent],
+        [true, '27 characters; this box takes 20']);
+      const nameInput = CN.panel.root.querySelector('.field.fullName input');
+      nameInput.value = 'Sam Lee';
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      expect('any box: typed name used, guess mark gone', [shortItem()?.querySelector('.preview').textContent, guessOf('fullName').hidden],
+        ['Hi Sam, this is quite long', true]);
+      noteBox.focus();
+      clickItem('Short note');
+      await wait(300);
+      expect('any box: inserted with the typed name', noteBox.value, 'Hi Sam, this is quite long');
+      await wait(1200);
+      expect('any box: typed name kept on refresh', fieldValues()[0], 'Sam Lee');
+      await CN.deleteTemplate(shortNote.id);
+      document.title = pageTitle;
+      noteBox.blur();
+      host.innerHTML = '';
+      await wait(900);
+      expect('any box: gone with the box', panelHost(), null);
       history.back();
       await wait(100);
 

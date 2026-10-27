@@ -97,6 +97,14 @@ a type and a message (InMails also have a subject). Types decide how a template 
 | InMail | Sales Navigator InMail | Auto-fill (subject + message) from the default |
 | Message | LinkedIn messaging; Sales Navigator messages to connections and inbox | Picked from the in-page panel, inserted into the open conversation (or the box you last clicked) |
 
+Any other text box works too: click into it and the panel appears beside it (a free message, a
+connection note, or a box LinkedIn added since), open or minimized to a small button, whichever you
+left it as. The panel lists every template, the
+type that fits the box first (InMail when the box has a subject line, which it fills too) and the
+others folded underneath. It shows who the text is for in To / Company / Title fields you can
+correct, marking guesses: a name taken from the Message button you clicked or from the profile
+you're on, a company read from a headline.
+
 Variables: `{name}`, `{fullName}`, `{company}` and `{title}`. Company and title come from, best first:
 what you typed into the panel's Company field; a Sales Navigator lead's current role, or the current
 role in a profile's Experience section; else their headline (`Head of Sales @ Acme`, `VP Sales at
@@ -125,9 +133,10 @@ src/core/                shared by every box
   fill.js                filling textareas/inputs and rich-text editors
   storage.js             template library, defaults, settings, export/import, migration
   focus.js               which text box the panel inserts into (incl. closed shadow roots, frames)
+  boxes.js               any text box: the template type that fits it, its subject line, who it's for
   watch.js               finds boxes (page, closed shadow root, frames) and fills them
   capture.js             "Save this page for debugging" (includes closed shadow roots)
-src/panel/panel.js       the docked template panel on pick-from-list pages
+src/panel/panel.js       the template panel, beside chats and any text box clicked into
 src/adapters/            one file per LinkedIn box
   connect-note.js        regular LinkedIn "Add a note to your invitation"
   sales-nav.js           Sales Navigator Connect note, InMail, messages and inbox
