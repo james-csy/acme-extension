@@ -44,10 +44,9 @@ Heard about a new version and don't want to wait? Click the extension's icon →
 updates**: it downloads it right away, then offers **Reload**. (On installs from before v0.15.0,
 this starts working after the first scheduled update.)
 
-Installed without the Terminal step (from a zip, on Windows)? The panel says when a new version is
-out. Download it from [Releases](https://github.com/james-csy/acme-extension/releases/latest),
-copy its files over your extension folder, then click the extension's icon → **Reload** and refresh
-LinkedIn.
+Installed without the Terminal step? That copy doesn't update itself; the panel says when a new
+version is out. Remove it in `chrome://extensions` (export your templates first) and install with
+the steps above, after which updates arrive by themselves.
 
 ### Uninstall
 

@@ -79,7 +79,8 @@ document.getElementById('capture').addEventListener('click', async () => {
 
 // ---- Updates -----------------------------------------------------------------
 // The checks are in background.js. An auto-updated install downloads a newer version when asked
-// and says when it's ready; any other says when GitHub has a newer one, and how to get it.
+// (the same updater that runs every 6 hours) and says when it's ready; any other says when GitHub
+// has a newer one and points to the installer.
 
 const current = chrome.runtime.getManifest().version;
 const checkLink = document.getElementById('check-update');
@@ -113,10 +114,11 @@ async function checkForUpdates(manual) {
   }
 }
 
-document.getElementById('download').addEventListener('click', async () => {
-  const { update } = await chrome.storage.local.get('update');
-  chrome.tabs.create({ url: update.download });
-});
+// A copy without the auto-updater (from a zip, or a developer's folder): the install steps, which
+// set the updater up
+document.getElementById('how-to-update').addEventListener('click', () =>
+  chrome.tabs.create({ url: 'https://github.com/james-csy/acme-extension#install-mac' })
+);
 checkLink.addEventListener('click', () => checkForUpdates(true));
 
 // Loads the folder's files again; open LinkedIn tabs then need a refresh to use them (not done for
