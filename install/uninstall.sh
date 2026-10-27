@@ -7,6 +7,8 @@ set -euo pipefail
 LABEL="com.connectnote.updater"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
+# The update helper registered with each browser (see update.sh)
+find "$HOME/Library/Application Support" -maxdepth 4 -path "*/NativeMessagingHosts/$LABEL.json" -delete 2>/dev/null || true
 rm -rf "$HOME/Library/Application Support/ConnectNote"
 if [ -d "$HOME/ConnectNote" ] && [ ! -d "$HOME/ConnectNote/.git" ]; then rm -rf "$HOME/ConnectNote"; fi
 

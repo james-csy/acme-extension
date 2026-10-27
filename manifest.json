@@ -5,7 +5,8 @@
   "description": "Fills your saved templates into LinkedIn's connection note and message boxes.",
   "permissions": [
     "storage",
-    "alarms"
+    "alarms",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "https://www.linkedin.com/*"

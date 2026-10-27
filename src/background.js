@@ -15,7 +15,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ---- Updates ---------------------------------------------------------------------------------
 // Chrome never updates an extension loaded from a folder, so there are two ways it gets updated:
 // - Installed with install/install.sh (auto-update.json in the folder): a launchd job copies newer
-//   releases into the folder. When the folder's manifest has a different version from the one
+//   releases into the folder every 6 hours. The popup's Check for updates also runs it right away,
+//   through the helper it registers with the browser (install/native-host.sh;
+//   installs from before it existed get it on their next update). When the folder's manifest has a different version from the one
 //   running, reload: straight away if no LinkedIn tab is open (nothing to lose), else once the
 //   last one closes, or from the popup.
 // - Otherwise: once a day compare with the latest release on GitHub, and when there's a newer one
@@ -27,6 +29,7 @@ const LATEST_RELEASE = `https://api.github.com/repos/${REPO}/releases/latest`;
 const CHECK_EVERY_MINUTES = 60;
 const GITHUB_EVERY_MS = 24 * 60 * 60 * 1000;
 const LINKEDIN_TABS = { url: 'https://www.linkedin.com/*' };
+const UPDATER = 'com.connectnote.updater';
 const running = chrome.runtime.getManifest().version;
 
 // "0.12.0" newer than "0.11.3"?
@@ -66,6 +69,17 @@ async function checkFolder() {
   return installed;
 }
 
+// Auto-updated install: download a newer release into the folder now. The helper's answer
+// ({ ok, before, after, log }), or null if it isn't registered with this browser yet.
+async function runUpdater() {
+  try {
+    return await chrome.runtime.sendNativeMessage(UPDATER, { type: 'update' });
+  } catch (error) {
+    console.log('[Connect Note] Update helper not available:', error.message);
+    return null;
+  }
+}
+
 // Other installs: the latest release on GitHub, if newer. Offline or GitHub unreachable: what the last
 // check found.
 async function checkGitHub(force) {
@@ -86,9 +100,14 @@ async function checkGitHub(force) {
   }
 }
 
-// Returns { auto, installed } for an auto-updated install, else { auto, latest, download, error }
+// Returns { auto, installed, ran } for an auto-updated install (`ran`: the helper answered), else
+// { auto, latest, download, error }. `force` (a click on Check for updates) runs the auto-updater first.
 async function checkForUpdates({ force = false } = {}) {
-  if (await readOwnFile('auto-update.json')) return { auto: true, installed: await checkFolder() };
+  if (await readOwnFile('auto-update.json')) {
+    const ran = force ? await runUpdater() : null;
+    const error = ran && !ran.ok ? ran.log || 'the updater failed' : undefined;
+    return { auto: true, installed: await checkFolder(), ran: Boolean(ran), error };
+  }
   const update = await checkGitHub(force);
   announce(update?.latest ? { kind: 'available', version: update.latest } : null);
   return { auto: false, ...update };

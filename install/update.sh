@@ -2,7 +2,8 @@
 # Keeps ~/ConnectNote in step with the latest release on GitHub (Releases, not the main branch:
 # pushing to main ships nothing until a release is published). launchd runs this at login and
 # every 6 hours (see install.sh); install.sh also runs it once with --from <unzipped folder>.
-# The extension notices the new files itself and reloads (see src/background.js).
+# The extension notices the new files itself and reloads (see src/background.js). It can also run
+# this straight away (popup → Check for updates) through native-host.sh, registered below.
 #
 # For testing, CONNECT_NOTE_TAG (e.g. v0.12.1) and CONNECT_NOTE_ZIP (file:// works) skip GitHub.
 set -euo pipefail
@@ -26,6 +27,39 @@ newer() {
 
 # Never mirror over a developer's own checkout
 if [ -d "$EXT_DIR/.git" ]; then log "$EXT_DIR is a git checkout; not touching it"; exit 1; fi
+
+# Lets the extension run this script when asked (native-host.sh): registered with every
+# Chrome-based browser on this Mac, for the extension loaded from $EXT_DIR only. An extension
+# loaded from a folder gets its id from the folder's path: the first 32 hex digits of its SHA-256,
+# written with the letters a-p. Done on every run, so installs from before this get it too.
+HOST="com.connectnote.updater"
+BROWSER_DIRS=(
+  "Google/Chrome" "Google/Chrome Beta" "Google/Chrome Canary" "Chromium" "BraveSoftware/Brave-Browser"
+  "Microsoft Edge" "Vivaldi" "Arc/User Data" "Dia/User Data"
+)
+register_host() {
+  [ -f "$EXT_DIR/install/native-host.sh" ] || return 0
+  cp "$EXT_DIR/install/native-host.sh" "$SUPPORT_DIR/native-host.sh.new"
+  chmod +x "$SUPPORT_DIR/native-host.sh.new"
+  mv -f "$SUPPORT_DIR/native-host.sh.new" "$SUPPORT_DIR/native-host.sh"
+  local id dir
+  id=$(printf '%s' "$EXT_DIR" | shasum -a 256 | head -c 32 | tr '0-9a-f' 'a-p')
+  for dir in "${BROWSER_DIRS[@]}"; do
+    dir="$HOME/Library/Application Support/$dir"
+    [ -d "$dir" ] || continue
+    mkdir -p "$dir/NativeMessagingHosts"
+    cat > "$dir/NativeMessagingHosts/$HOST.json" <<JSON
+{
+  "name": "$HOST",
+  "description": "LinkedIn Connect Note: checks for updates when asked",
+  "path": "$SUPPORT_DIR/native-host.sh",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://$id/"]
+}
+JSON
+  done
+}
+register_host
 
 installed=""
 [ -f "$EXT_DIR/manifest.json" ] && installed=$(version_of < "$EXT_DIR/manifest.json")
@@ -75,4 +109,5 @@ for script in update.sh uninstall.sh; do
   fi
 done
 
+register_host
 log "Installed ${new} (was ${installed:-nothing})"

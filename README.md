@@ -40,6 +40,10 @@ ConnectNote folder. Then either:
 - the template panel on LinkedIn shows **Update ready** → click **Update** (the page refreshes), or
 - it switches over by itself the next time you have no LinkedIn tabs open.
 
+Heard about a new version and don't want to wait? Click the extension's icon → **Check for
+updates**: it downloads it right away, then offers **Reload**. (On installs from before v0.15.0,
+this starts working after the first scheduled update.)
+
 Installed without the Terminal step (from a zip, on Windows)? The panel says when a new version is
 out. Download it from [Releases](https://github.com/james-csy/acme-extension/releases/latest),
 copy its files over your extension folder, then click the extension's icon → **Reload** and refresh
@@ -72,7 +76,10 @@ scripts/release.sh 0.12.1 "Short note on what changed"
 It sets the version in `manifest.json`, commits, tags `v0.12.1`, pushes, and publishes the release
 (needs the GitHub CLI, `gh`, logged in). Each installed copy's updater
 (`~/Library/Application Support/ConnectNote/update.sh`, run by launchd at login and every 6 hours)
-downloads it, and the extension switches over as described in [Updating](#updating). Versions only
+downloads it, and the extension switches over as described in [Updating](#updating). The popup's
+**Check for updates** runs the same updater on demand, through `install/native-host.sh`, which
+`update.sh` registers with each Chrome-based browser (Chrome's native messaging) for the extension
+loaded from `~/ConnectNote`. Versions only
 go up: to undo a release, release the old code with a higher version. The repo must stay public,
 since the updater downloads without signing in.
 

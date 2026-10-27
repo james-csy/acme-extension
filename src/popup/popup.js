@@ -78,8 +78,8 @@ document.getElementById('capture').addEventListener('click', async () => {
 });
 
 // ---- Updates -----------------------------------------------------------------
-// The checks are in background.js. An auto-updated install says when a newer version has been
-// copied into its folder; any other says when GitHub has a newer one, and how to get it.
+// The checks are in background.js. An auto-updated install downloads a newer version when asked
+// and says when it's ready; any other says when GitHub has a newer one, and how to get it.
 
 const current = chrome.runtime.getManifest().version;
 const checkLink = document.getElementById('check-update');
@@ -92,7 +92,6 @@ function showUpdate(result) {
   const latest = !result.auto && result.latest && result.latest !== current ? result.latest : null;
   document.getElementById('update').hidden = !latest;
   document.getElementById('update-version').textContent = latest || '';
-  if (result.auto) checkLink.textContent = 'Auto-updates on';
 }
 
 async function checkForUpdates(manual) {
@@ -106,6 +105,9 @@ async function checkForUpdates(manual) {
   if (result?.error) {
     status.className = 'status error';
     status.textContent = `Couldn't check for updates: ${result.error}`;
+  } else if (result?.auto && !result.ran) {
+    // The helper isn't registered with this browser yet: the next scheduled update sets it up
+    status.textContent = 'Updates download by themselves every few hours; checking from here starts working after the next one.';
   } else {
     status.textContent = result?.installed || result?.latest ? '' : `You're up to date (v${current})`;
   }
