@@ -492,6 +492,34 @@
       bubble.innerHTML = `<header><h2 class="msg-overlay-bubble-header__title"> Priya  Raman </h2></header>
         <form><div contenteditable="true"></div></form>`;
       expect('names: pop-up chat window header', CN.nameNear(bubble.querySelector('[contenteditable]')), 'Priya Raman');
+      // A new message (opened from a profile or "New message"): the header only says "New message";
+      // the person is in the recipient chip and the profile card, whose headline gives the job
+      const newMessage = ({ chip = true, headline }) => {
+        host.innerHTML = `<div class="msg-overlay-conversation-bubble">
+          <header><h2 class="msg-overlay-bubble-header__title">New message</h2></header>
+          <div>${chip ? '<div class="artdeco-pill"><span>Jasper Bennett</span><button aria-label="Remove Jasper Bennett">×</button></div>' : ''}
+            <input role="combobox" aria-autocomplete="list" aria-label="Type a name or multiple names"></div>
+          <div class="msg-s-profile-card"><a href="https://www.linkedin.com/in/jasper-b/"><span>Jasper Bennett</span></a><span> · 1st</span>
+            <div>${headline}</div></div>
+          <form><div contenteditable="true" aria-label="Write a message…"></div></form></div>`;
+        return host.querySelector('[contenteditable]');
+      };
+      store.local = {};
+      const fresh = await messaging.getContext(newMessage({ headline: 'Software Engineer at Roadrunner' }));
+      expect('messaging: new message, name from the recipient chip, job from the profile card',
+        [fresh.fullName, fresh.company, fresh.title], ['Jasper Bennett', 'Roadrunner', 'Software Engineer']);
+      store.local = {};
+      const cardOnly = await messaging.getContext(newMessage({ chip: false, headline: 'Head of Sales @ Initech' }));
+      expect('messaging: new message, name and profile id from the profile card',
+        [cardOnly.fullName, cardOnly.ids.includes('jasper-b'), cardOnly.company], ['Jasper Bennett', true, 'Initech']);
+      store.local = {};
+      const gtm = await messaging.getContext(newMessage({ headline: 'GTM' }));
+      expect('messaging: new message, headline with no company gives the name only', [gtm.fullName, gtm.company], ['Jasper Bennett', null]);
+      host.innerHTML = `<div class="msg-overlay-conversation-bubble"><h2 class="msg-overlay-bubble-header__title">New message</h2>
+        <form><div contenteditable="true"></div></form></div>`;
+      expect('names: "New message" is never taken for a name', CN.nameNear(host.querySelector('[contenteditable]')), null);
+      host.innerHTML = '';
+      store.local = {};
       const cancelled = !clickItem('2nd touch');
       await wait(200);
       expect('panel: click keeps focus in the message box', cancelled, true);

@@ -33,11 +33,23 @@
   // Ways a conversation names the other person, each with how to read the name off the element.
   // Newer pages label a "View <Name>'s profile" link; the classic messaging page (and its pop-up
   // chat windows) has an "Open <Name>'s profile" link around the name in the conversation header.
+  // A new message (a pop-up whose header just says "New message") names them in the recipient
+  // chip ("Jasper Bennett ×", whose remove button is labelled "Remove <Name>") and in the profile
+  // card under it, which links their name to their profile. Those two are looked for only close to
+  // the box (in its window), so a page's other profile links ("People also viewed") aren't taken.
+  const NEAR = 10;
   const NAME_SOURCES = [
     ['[aria-label^="View "][aria-label$="s profile"]', (el) => el.getAttribute('aria-label').replace(/^View /, '')],
     ['a.msg-thread__link-to-profile[title^="Open "]', (el) => el.getAttribute('title').replace(/^Open /, '')],
     ['.msg-entity-lockup__entity-title, .msg-overlay-bubble-header__title', (el) => el.textContent],
+    ['button[aria-label^="Remove "]', (el) => el.getAttribute('aria-label').replace(/^Remove /, ''), NEAR],
+    ['a[href*="/in/"]', (el) => el.textContent, NEAR],
   ];
+
+  // A window title or a button's label isn't a name: "New message", "Remove attachment"
+  const NOT_A_NAME = /^(new message|new group|messaging|compose|attachment)\b/i;
+  const looksLikeName = (text) =>
+    text.length <= 60 && /^\p{Lu}/u.test(text) && !/\d/.test(text) && text.split(' ').length <= 6 && !NOT_A_NAME.test(text);
 
   // The person a message box is for: the nearest name source walking out from the box (crossing
   // shadow-root boundaries), with the id from their profile link when there is one. Skip the
@@ -48,10 +60,11 @@
     let node = box;
     for (let depth = 0; node && depth < 30; depth += 1) {
       node = node.parentElement || node.getRootNode?.().host || null;
-      for (const [selector, read] of NAME_SOURCES) {
+      for (const [selector, read, within = Infinity] of NAME_SOURCES) {
+        if (depth >= within) continue;
         for (const el of node?.querySelectorAll?.(selector) || []) {
           const name = read(el).replace(/[’']s profile$/, '').replace(/\s+/g, ' ').trim();
-          if (name && name !== own) {
+          if (looksLikeName(name) && name !== own) {
             return { fullName: name, profileId: CN.profileIdOf(el.closest('a[href]')?.getAttribute('href')), job: jobNear(node, el, name) };
           }
         }
@@ -80,7 +93,9 @@
         const text = container.innerText || '';
         if (text.length > 400) break;
         const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-        const after = lines.slice(lines.findIndex((line) => line.includes(fullName)) + 1).filter((line) => !NOT_HEADLINE.test(line));
+        // After the last line with their name: a new message names them in the recipient chip and
+        // again in the profile card, above the headline
+        const after = lines.slice(lines.findLastIndex((line) => line.includes(fullName)) + 1).filter((line) => !NOT_HEADLINE.test(line));
         if (!lines.some((line) => line.includes(fullName)) || !after.length) continue;
         const job = CN.companyFromHeadline(after[0]);
         if (job) return job;
