@@ -33,37 +33,39 @@
   // Ways a conversation names the other person, each with how to read the name off the element.
   // Newer pages label a "View <Name>'s profile" link; the classic messaging page (and its pop-up
   // chat windows) has an "Open <Name>'s profile" link around the name in the conversation header.
-  // A new message (a pop-up whose header just says "New message") names them in the recipient
-  // chip ("Jasper Bennett ×", whose remove button is labelled "Remove <Name>") and in the profile
-  // card under it, which links their name to their profile. Those two are looked for only close to
-  // the box (in its window), so a page's other profile links ("People also viewed") aren't taken.
-  const NEAR = 10;
   const NAME_SOURCES = [
     ['[aria-label^="View "][aria-label$="s profile"]', (el) => el.getAttribute('aria-label').replace(/^View /, '')],
     ['a.msg-thread__link-to-profile[title^="Open "]', (el) => el.getAttribute('title').replace(/^Open /, '')],
     ['.msg-entity-lockup__entity-title, .msg-overlay-bubble-header__title', (el) => el.textContent],
-    ['button[aria-label^="Remove "]', (el) => el.getAttribute('aria-label').replace(/^Remove /, ''), NEAR],
-    ['a[href*="/in/"]', (el) => el.textContent, NEAR],
+  ];
+  // Only when those find nothing: a new message, whose header just says "New message", names them
+  // in the recipient chip ("Jasper Bennett ×", whose remove button is labelled "Remove <Name>") and
+  // in the profile card under it, which links their name to their profile. Looked for only close
+  // to the box (in its window): in a conversation the messages' avatar links come before the
+  // header, and a page's other profile links ("People also viewed") aren't the person either.
+  const NEAR = 10;
+  const NEW_MESSAGE_SOURCES = [
+    ['button[aria-label^="Remove "]', (el) => el.getAttribute('aria-label').replace(/^Remove /, '')],
+    ['a[href*="/in/"]', (el) => el.textContent],
   ];
 
-  // A window title or a button's label isn't a name: "New message", "Remove attachment"
-  const NOT_A_NAME = /^(new message|new group|messaging|compose|attachment)\b/i;
+  // A window title, a button's label or an avatar's online status isn't a name: "New message",
+  // "Remove attachment", "Status is offline"
+  const NOT_A_NAME = /^(new message|new group|messaging|compose|attachment|status is)\b/i;
   const looksLikeName = (text) =>
     text.length <= 60 && /^\p{Lu}/u.test(text) && !/\d/.test(text) && text.split(' ').length <= 6 && !NOT_A_NAME.test(text);
 
-  // The person a message box is for: the nearest name source walking out from the box (crossing
-  // shadow-root boundaries), with the id from their profile link when there is one. Skip the
-  // signed-in person's own name, which appears on their sent messages.
-  // `headline` is their headline when the conversation shows it next to their name (see below).
-  function personNear(box) {
+  // The first name one of `sources` gives, walking out from the box (crossing shadow-root
+  // boundaries) at most `maxDepth` levels, with the id from their profile link when there is one.
+  // Skips the signed-in person's own name, which appears on their sent messages.
+  function findPerson(box, sources, maxDepth) {
     const own = ownName();
     let node = box;
-    for (let depth = 0; node && depth < 30; depth += 1) {
+    for (let depth = 0; node && depth < maxDepth; depth += 1) {
       node = node.parentElement || node.getRootNode?.().host || null;
-      for (const [selector, read, within = Infinity] of NAME_SOURCES) {
-        if (depth >= within) continue;
+      for (const [selector, read] of sources) {
         for (const el of node?.querySelectorAll?.(selector) || []) {
-          const name = read(el).replace(/[’']s profile$/, '').replace(/\s+/g, ' ').trim();
+          const name = read(el).replace(/Status is \w+/g, '').replace(/[’']s profile$/, '').replace(/\s+/g, ' ').trim();
           if (looksLikeName(name) && name !== own) {
             return { fullName: name, profileId: CN.profileIdOf(el.closest('a[href]')?.getAttribute('href')), job: jobNear(node, el, name) };
           }
@@ -72,6 +74,10 @@
     }
     return null;
   }
+
+  // The person a message box is for. `job` is their job when the conversation shows their headline
+  // next to their name (see below).
+  const personNear = (box) => findPerson(box, NAME_SOURCES, 30) || findPerson(box, NEW_MESSAGE_SOURCES, NEAR);
 
   const nameNear = (box) => personNear(box)?.fullName ?? null;
 

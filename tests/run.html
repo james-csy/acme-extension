@@ -518,6 +518,14 @@
       host.innerHTML = `<div class="msg-overlay-conversation-bubble"><h2 class="msg-overlay-bubble-header__title">New message</h2>
         <form><div contenteditable="true"></div></form></div>`;
       expect('names: "New message" is never taken for a name', CN.nameNear(host.querySelector('[contenteditable]')), null);
+      // An existing chat: the messages (each with an avatar link whose hidden text is the online
+      // status) are closer to the box than the header, which still names the person
+      host.innerHTML = `<div class="msg-overlay-conversation-bubble">
+        <header><h2 class="msg-overlay-bubble-header__title">Andrew Li</h2></header>
+        <div><ul><li><a href="https://www.linkedin.com/in/andrew-li/"><img alt=""><span>Status is offline</span></a>
+          <span>Andrew Li</span><p>come hang!</p></li></ul>
+          <form><div contenteditable="true" aria-label="Write a message…"></div></form></div></div>`;
+      expect('names: existing chat named by its header, not an avatar’s online status', CN.nameNear(host.querySelector('[contenteditable]')), 'Andrew Li');
       host.innerHTML = '';
       store.local = {};
       const cancelled = !clickItem('2nd touch');
