@@ -526,6 +526,18 @@
           <span>Andrew Li</span><p>come hang!</p></li></ul>
           <form><div contenteditable="true" aria-label="Write a message…"></div></form></div></div>`;
       expect('names: existing chat named by its header, not an avatar’s online status', CN.nameNear(host.querySelector('[contenteditable]')), 'Andrew Li');
+      // Pop-up chats side by side: a new message (no name in its header) beside an existing chat.
+      // The new one is named from its own chip, never the other window's header
+      host.innerHTML = `<div class="msg-overlay-list">
+        <div class="msg-overlay-conversation-bubble" id="josh"><h2 class="msg-overlay-bubble-header__title">New message</h2>
+          <div><span>Josh MacIntyre</span><button aria-label="Remove Josh MacIntyre">×</button></div>
+          <div><a href="https://www.linkedin.com/in/joshmacintyre/"><span>Josh MacIntyre</span></a><span> · 1st</span><div>Head of Operations at Roadrunner</div></div>
+          <form><div contenteditable="true" aria-label="Write a message…"></div></form></div>
+        <div class="msg-overlay-conversation-bubble"><h2 class="msg-overlay-bubble-header__title">Andrew Li</h2>
+          <form><div contenteditable="true" aria-label="Write a message…"></div></form></div></div>`;
+      const besideChat = CN.personNear(host.querySelector('#josh [contenteditable]'));
+      expect('names: new message beside another chat, named from its own window',
+        [besideChat?.fullName, besideChat?.job?.company], ['Josh MacIntyre', 'Roadrunner']);
       host.innerHTML = '';
       store.local = {};
       const cancelled = !clickItem('2nd touch');

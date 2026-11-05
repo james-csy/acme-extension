@@ -55,14 +55,22 @@
   const looksLikeName = (text) =>
     text.length <= 60 && /^\p{Lu}/u.test(text) && !/\d/.test(text) && text.split(' ').length <= 6 && !NOT_A_NAME.test(text);
 
+  // Leaving the box's own window: a container with another chat's message box in it (pop-up chats
+  // sit side by side, and one whose header names nobody mustn't borrow the next one's name)
+  const TEXT_BOXES = '[contenteditable="true"], textarea';
+  const holdsOtherBox = (node, box) =>
+    [...(node.querySelectorAll?.(TEXT_BOXES) || [])].some((el) => el !== box && !box.contains(el) && !el.contains(box));
+
   // The first name one of `sources` gives, walking out from the box (crossing shadow-root
-  // boundaries) at most `maxDepth` levels, with the id from their profile link when there is one.
-  // Skips the signed-in person's own name, which appears on their sent messages.
+  // boundaries) at most `maxDepth` levels and never out of its window, with the id from their
+  // profile link when there is one. Skips the signed-in person's own name, which appears on their
+  // sent messages.
   function findPerson(box, sources, maxDepth) {
     const own = ownName();
     let node = box;
     for (let depth = 0; node && depth < maxDepth; depth += 1) {
       node = node.parentElement || node.getRootNode?.().host || null;
+      if (!node || holdsOtherBox(node, box)) break;
       for (const [selector, read] of sources) {
         for (const el of node?.querySelectorAll?.(selector) || []) {
           const name = read(el).replace(/Status is \w+/g, '').replace(/[’']s profile$/, '').replace(/\s+/g, ' ').trim();
