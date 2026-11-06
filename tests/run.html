@@ -526,6 +526,15 @@
           <span>Andrew Li</span><p>come hang!</p></li></ul>
           <form><div contenteditable="true" aria-label="Write a message…"></div></form></div></div>`;
       expect('names: existing chat named by its header, not an avatar’s online status', CN.nameNear(host.querySelector('[contenteditable]')), 'Andrew Li');
+      // An existing chat whose header names them without a link: the headline is in the profile
+      // card at the top of the conversation, not under the header; their messages give nothing
+      host.innerHTML = `<div class="msg-overlay-conversation-bubble"><header><h2 class="msg-overlay-bubble-header__title">Andrew Li</h2></header>
+        <div><div class="card"><p><span>Andrew Li</span><span> · 1st</span></p><p>Co-Founder at Judgment Labs</p></div>
+          <ul><li><span>Andrew Li</span><span> • 9:54 PM</span><p>Coming to the event at Benchmark as Head of Sales at Wrongco?</p></li></ul>
+          <form><div contenteditable="true" aria-label="Write a message…"></div></form></div></div>`;
+      const andrew = CN.personNear(host.querySelector('[contenteditable]'));
+      expect('names: header without a link, job from the profile card further down',
+        [andrew?.fullName, andrew?.job?.company, andrew?.job?.title], ['Andrew Li', 'Judgment Labs', 'Co-Founder']);
       // Pop-up chats side by side: a new message (no name in its header) beside an existing chat.
       // The new one is named from its own chip, never the other window's header
       host.innerHTML = `<div class="msg-overlay-list">

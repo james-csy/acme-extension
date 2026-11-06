@@ -98,7 +98,12 @@
   function jobNear(conversation, nameElement, fullName) {
     const id = CN.profileIdOf(nameElement.closest('a[href]')?.getAttribute('href'));
     const links = id ? [...conversation.querySelectorAll('a[href*="/in/"]')].filter((a) => CN.profileIdOf(a.getAttribute('href')) === id) : [];
-    for (const spot of new Set([nameElement, ...links])) {
+    // Where else their name stands on its own, e.g. the profile card at the top of a chat whose
+    // header names them without a link (the innermost element with just their name)
+    const named = [...conversation.querySelectorAll('*')]
+      .filter((el) => el.textContent.trim() === fullName && ![...el.children].some((child) => child.textContent.trim() === fullName))
+      .slice(0, 12);
+    for (const spot of new Set([nameElement, ...links, ...named])) {
       // The smallest container around it with a line after the name, kept short so it's the
       // header or card, not the whole conversation
       let container = spot;
@@ -107,9 +112,13 @@
         const text = container.innerText || '';
         if (text.length > 400) break;
         const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-        // After the last line with their name: a new message names them in the recipient chip and
-        // again in the profile card, above the headline
-        const after = lines.slice(lines.findLastIndex((line) => line.includes(fullName)) + 1).filter((line) => !NOT_HEADLINE.test(line));
+        // The first line after their name that isn't their name again ("Jasper Bennett · 1st" in
+        // the profile card under a new message's recipient chip). "Andrew Li • 9:54 PM" starts a
+        // message, so it counts as a line, and isn't a headline.
+        const isNameLine = (line) =>
+          line.startsWith(fullName) &&
+          !line.slice(fullName.length).replace(/[·•]?\s*(1st|2nd|3rd\+?)\b/gi, '').replace(/\([^)]*\)/g, '').replace(/[\s·•|]/g, '');
+        const after = lines.slice(lines.findIndex((line) => line.includes(fullName)) + 1).filter((line) => !isNameLine(line) && !NOT_HEADLINE.test(line));
         if (!lines.some((line) => line.includes(fullName)) || !after.length) continue;
         const job = CN.companyFromHeadline(after[0]);
         if (job) return job;
