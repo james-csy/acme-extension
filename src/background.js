@@ -127,15 +127,46 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 chrome.runtime.onStartup.addListener(scheduleChecks);
 
-// After an update or a reload, LinkedIn tabs that were already open still have the old copy, which
-// the browser cuts off, so it shuts itself down (watch.js) and nothing fills in until the page is
-// refreshed. Start the new copy in them instead.
-chrome.runtime.onInstalled.addListener(async ({ reason }) => {
-  if (reason !== 'install' && reason !== 'update') return;
-  const files = chrome.runtime.getManifest().content_scripts[0].js;
-  for (const tab of await chrome.tabs.query(LINKEDIN_TABS)) {
-    chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files }).catch(() => {}); // discarded or still loading
+// ---- Keeping the content scripts running ---------------------------------------------------
+// A LinkedIn page can end up without a working copy: tabs open during an update or a reload keep
+// the old one, which the browser cuts off, so it shuts itself down (watch.js); and now and then a
+// page (re)loaded by the browser on its own doesn't get one. Either way nothing fills in until the
+// page is refreshed. So whenever a LinkedIn tab finishes loading, is switched to, or the extension
+// starts, check each frame and start the content scripts where they aren't running. The check runs
+// in the content scripts' own world, so a live copy is seen and never started twice; a cut-off old
+// copy lives in another world and doesn't count. Frames the manifest leaves out are skipped.
+const CONTENT_FILES = chrome.runtime.getManifest().content_scripts[0].js;
+const isLinkedIn = (url) => url?.startsWith('https://www.linkedin.com/');
+
+async function ensureRunning(tabId) {
+  let frames;
+  try {
+    frames = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => ({
+        wanted: location.hostname === 'www.linkedin.com' && !location.pathname.startsWith('/tscp-serving/'),
+        running: Boolean(globalThis.CN?.started),
+      }),
+    });
+  } catch {
+    return; // discarded, still loading, or not a page we can reach
   }
+  const frameIds = frames.filter((f) => f.result?.wanted && !f.result.running).map((f) => f.frameId);
+  if (!frameIds.length) return;
+  console.log('[Connect Note] Starting in tab', tabId, 'frames', frameIds);
+  await chrome.scripting.executeScript({ target: { tabId, frameIds }, files: CONTENT_FILES }).catch(() => {});
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  for (const tab of await chrome.tabs.query(LINKEDIN_TABS)) ensureRunning(tab.id);
+});
+// A second after loading finishes, so the copy the manifest starts has had its turn
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.status === 'complete' && isLinkedIn(tab.url)) setTimeout(() => ensureRunning(tabId), 1000);
+});
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (isLinkedIn(tab?.url)) ensureRunning(tabId);
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'update-check') checkForUpdates();
