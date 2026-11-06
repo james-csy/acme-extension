@@ -124,7 +124,7 @@ checkLink.addEventListener('click', () => checkForUpdates(true));
 // Loads the folder's files again; open LinkedIn tabs then need a refresh to use them (not done for
 // you, so nothing half-typed is lost)
 const reload = () => chrome.runtime.reload();
-['reload', 'reload-update', 'reload-installed'].forEach((id) => document.getElementById(id).addEventListener('click', reload));
+['reload', 'reload-installed'].forEach((id) => document.getElementById(id).addEventListener('click', reload));
 
 checkForUpdates(false);
 render();

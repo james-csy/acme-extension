@@ -518,6 +518,10 @@
       host.innerHTML = `<div class="msg-overlay-conversation-bubble"><h2 class="msg-overlay-bubble-header__title">New message</h2>
         <form><div contenteditable="true"></div></form></div>`;
       expect('names: "New message" is never taken for a name', CN.nameNear(host.querySelector('[contenteditable]')), null);
+      host.innerHTML = `<div class="msg-overlay-conversation-bubble"><h2 class="msg-overlay-bubble-header__title">New message</h2>
+        <div><span>Proposal.pdf</span><button aria-label="Remove Proposal">×</button></div>
+        <form><div contenteditable="true"></div></form></div>`;
+      expect('names: an attachment’s remove button isn’t a recipient', CN.nameNear(host.querySelector('[contenteditable]')), null);
       // An existing chat: the messages (each with an avatar link whose hidden text is the online
       // status) are closer to the box than the header, which still names the person
       host.innerHTML = `<div class="msg-overlay-conversation-bubble">
@@ -894,6 +898,26 @@
       expect('any box: gone with the box', panelHost(), null);
       history.back();
       await wait(100);
+
+      // --- Popup ----------------------------------------------------------------
+      // The toolbar popup loads without a script error (an element id the script expects but the
+      // page no longer has stops it before it checks for updates) and asks for an update check
+      const popupErrors = [];
+      window.popupErrors = popupErrors;
+      const popupHtml = await (await fetch('../src/popup/popup.html', { cache: 'no-store' })).text();
+      const popupFrame = document.createElement('iframe');
+      popupFrame.srcdoc = popupHtml.replace('<head>', `<head><base href="${new URL('../src/popup/', location.href)}"><script>
+        window.chrome = { ...parent.chrome, runtime: { ...parent.chrome.runtime, getManifest: () => ({ version: '0.0.0' }), openOptionsPage() {} } };
+        window.onerror = (message) => parent.popupErrors.push(String(message));
+        window.onunhandledrejection = (event) => parent.popupErrors.push(String(event.reason));
+      <\/script>`);
+      const sentBefore = sent.length;
+      document.body.append(popupFrame);
+      await new Promise((resolve) => popupFrame.addEventListener('load', resolve, { once: true }));
+      await wait(500);
+      expect('popup: loads without errors and checks for updates',
+        [popupErrors, sent.slice(sentBefore).some((m) => m.type === 'check-update')], [[], true]);
+      popupFrame.remove();
 
       // --- Report -------------------------------------------------------------
       window.results = results;

@@ -45,7 +45,11 @@
   // header, and a page's other profile links ("People also viewed") aren't the person either.
   const NEAR = 10;
   const NEW_MESSAGE_SOURCES = [
-    ['button[aria-label^="Remove "]', (el) => el.getAttribute('aria-label').replace(/^Remove /, '')],
+    // Two words or more: an attachment's remove button says "Remove Proposal"
+    ['button[aria-label^="Remove "]', (el) => {
+      const name = el.getAttribute('aria-label').replace(/^Remove /, '').trim();
+      return /\s/.test(name) ? name : '';
+    }],
     ['a[href*="/in/"]', (el) => el.textContent],
   ];
 
@@ -55,11 +59,14 @@
   const looksLikeName = (text) =>
     text.length <= 60 && /^\p{Lu}/u.test(text) && !/\d/.test(text) && text.split(' ').length <= 6 && !NOT_A_NAME.test(text);
 
-  // Leaving the box's own window: a container with another chat's message box in it (pop-up chats
-  // sit side by side, and one whose header names nobody mustn't borrow the next one's name)
+  // Leaving the box's own window: a container with another chat's message box on screen in it
+  // (pop-up chats sit side by side, and one whose header names nobody mustn't borrow the next
+  // one's name). Hidden boxes, like one an editor keeps in sync behind the scenes, don't count.
   const TEXT_BOXES = '[contenteditable="true"], textarea';
   const holdsOtherBox = (node, box) =>
-    [...(node.querySelectorAll?.(TEXT_BOXES) || [])].some((el) => el !== box && !box.contains(el) && !el.contains(box));
+    [...(node.querySelectorAll?.(TEXT_BOXES) || [])].some(
+      (el) => el !== box && !box.contains(el) && !el.contains(box) && el.getClientRects().length > 0
+    );
 
   // The first name one of `sources` gives, walking out from the box (crossing shadow-root
   // boundaries) at most `maxDepth` levels and never out of its window, with the id from their
@@ -99,10 +106,17 @@
     const id = CN.profileIdOf(nameElement.closest('a[href]')?.getAttribute('href'));
     const links = id ? [...conversation.querySelectorAll('a[href*="/in/"]')].filter((a) => CN.profileIdOf(a.getAttribute('href')) === id) : [];
     // Where else their name stands on its own, e.g. the profile card at the top of a chat whose
-    // header names them without a link (the innermost element with just their name)
-    const named = [...conversation.querySelectorAll('*')]
-      .filter((el) => el.textContent.trim() === fullName && ![...el.children].some((child) => child.textContent.trim() === fullName))
-      .slice(0, 12);
+    // header names them without a link: the elements whose own text is just their name
+    const named = [];
+    const walker = conversation.ownerDocument.createTreeWalker(conversation, NodeFilter.SHOW_TEXT);
+    while (named.length < 12 && walker.nextNode()) {
+      if (walker.currentNode.nodeValue.trim() === fullName) named.push(walker.currentNode.parentElement);
+    }
+    // "Jasper Bennett · 1st" (the profile card under a new message's recipient chip) is their name
+    // again; "Andrew Li • 9:54 PM" starts a message, so it counts as a line, and isn't a headline
+    const isNameLine = (line) =>
+      line.startsWith(fullName) &&
+      !line.slice(fullName.length).replace(/[·•]?\s*(1st|2nd|3rd\+?)\b/gi, '').replace(/\([^)]*\)/g, '').replace(/[\s·•|]/g, '');
     for (const spot of new Set([nameElement, ...links, ...named])) {
       // The smallest container around it with a line after the name, kept short so it's the
       // header or card, not the whole conversation
@@ -112,12 +126,7 @@
         const text = container.innerText || '';
         if (text.length > 400) break;
         const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-        // The first line after their name that isn't their name again ("Jasper Bennett · 1st" in
-        // the profile card under a new message's recipient chip). "Andrew Li • 9:54 PM" starts a
-        // message, so it counts as a line, and isn't a headline.
-        const isNameLine = (line) =>
-          line.startsWith(fullName) &&
-          !line.slice(fullName.length).replace(/[·•]?\s*(1st|2nd|3rd\+?)\b/gi, '').replace(/\([^)]*\)/g, '').replace(/[\s·•|]/g, '');
+        // The first line after their name that isn't their name again
         const after = lines.slice(lines.findIndex((line) => line.includes(fullName)) + 1).filter((line) => !isNameLine(line) && !NOT_HEADLINE.test(line));
         if (!lines.some((line) => line.includes(fullName)) || !after.length) continue;
         const job = CN.companyFromHeadline(after[0]);
