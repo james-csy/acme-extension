@@ -526,7 +526,10 @@
       clicked: ['from button', 'From the Message or Connect button you clicked. Check it, or type the right name.'],
       page: ['this profile', "The person whose page this is. Check it's who you're writing to."],
     },
-    company: { headline: ['from headline', 'Read from their LinkedIn headline. Check it, or type the right one.'] },
+    company: {
+      headline: ['from headline', 'Read from their LinkedIn headline. Check it, or type the right one.'],
+      experience: ['latest job', 'Their most recent job on their profile, which may have ended. Check it, or type the right one.'],
+    },
   };
 
   function renderFields() {
@@ -691,5 +694,16 @@
   });
 
   // `root` is for the test page, which can't otherwise see inside the closed shadow root
-  CN.panel = { update, get root() { return shadow; } };
+  // `remove` is for a copy of the extension that's been replaced (watch.js): it takes away its own
+  // panel, never the one the new copy has opened
+  CN.panel = {
+    update,
+    remove() {
+      host?.remove();
+      host = shadow = null;
+    },
+    get root() {
+      return shadow;
+    },
+  };
 })();

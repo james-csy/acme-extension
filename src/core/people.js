@@ -6,10 +6,11 @@
 //
 // Each record says where its company came from, and a weaker source never replaces a stronger one:
 // typed in the panel > the current job on their profile or lead page ('role') > read from their
-// headline ('headline', a guess; see headline.js).
+// headline ('headline', a guess; see headline.js) or a lead's latest job when they list no current
+// one ('experience', may have ended).
 (() => {
   const PREFIX = 'person:';
-  const RANK = { headline: 1, role: 2, typed: 3 };
+  const RANK = { headline: 1, experience: 1, role: 2, typed: 3 };
 
   // Most specific first: ids, then the name (two people with the same name are rare among the
   // ones one person looks at, but an id match always wins)

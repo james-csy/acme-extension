@@ -6,7 +6,8 @@
   "permissions": [
     "storage",
     "alarms",
-    "nativeMessaging"
+    "nativeMessaging",
+    "scripting"
   ],
   "host_permissions": [
     "https://www.linkedin.com/*"

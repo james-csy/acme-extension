@@ -6,15 +6,26 @@
   const onSalesNav = () => location.pathname.startsWith('/sales/');
   const textOf = (el) => el?.textContent.replace(/\s+/g, ' ').trim() || null;
 
-  // The lead whose page is open: their name, and title and company from the "Current role" block
+  // The lead whose page is open: their name, and their job, best first (`source` says which, for
+  // people.js and the panel):
+  //   'role'        the "Current roles" block: "<title> at <company>"
+  //   'headline'    their headline, when it names a company unmistakably (headline.js)
+  //   'experience'  the most recent job in Experience, when there's no current role: it may have
+  //                 ended ("No current role listed", the job under "Also worked at"), so it's a guess
   function openLead(doc) {
+    const fullName = textOf(doc.querySelector('h1[data-anonymize="person-name"]'));
     const title = doc.querySelector('[data-sn-view-name="lead-current-role"] [data-anonymize="job-title"]');
-    return {
-      fullName: textOf(doc.querySelector('h1[data-anonymize="person-name"]')),
-      title: textOf(title),
-      // The company link sits in the same line as the title: "<title> at <company>"
-      company: textOf(title?.parentElement.querySelector('[data-anonymize="company-name"]')),
-    };
+    if (title) {
+      // The company link sits in the same line as the title
+      const company = textOf(title.parentElement.querySelector('[data-anonymize="company-name"]'));
+      return { fullName, title: textOf(title), company, source: 'role' };
+    }
+    const headline = CN.companyFromHeadline(textOf(doc.querySelector('[data-x--lead-profile-card--headline] [data-anonymize="headline"]')));
+    if (headline) return { fullName, title: headline.title, company: headline.company, source: 'headline' };
+    // Experience lists companies, each with its roles under it, newest first
+    const latest = doc.querySelector('[data-sn-view-name="feature-lead-experience"] li');
+    const company = textOf(latest?.querySelector('[data-anonymize="company-name"]'));
+    return { fullName, title: textOf(latest?.querySelector('[data-anonymize="job-title"]')), company, source: company ? 'experience' : null };
   }
 
   // Title and company only when the dialog is for the lead whose page is open. A dialog opened from
@@ -27,6 +38,7 @@
       fullName,
       company: isLead ? lead.company : null,
       title: isLead ? lead.title : null,
+      companySource: isLead && lead.company ? lead.source : null,
     };
   }
 
@@ -69,7 +81,7 @@
     personOnPage(doc, path = location.pathname) {
       if (!path.startsWith('/sales/lead/')) return null;
       const lead = openLead(doc);
-      return lead.fullName ? { ids: [], ...lead, source: 'role' } : null;
+      return lead.fullName ? { ids: [], ...lead } : null;
     },
     // The dialog shows who the invitation is for, above the note
     async getContext(doc, box) {
@@ -109,7 +121,7 @@
       const ids = thread ? [`sn-thread:${thread}`] : [];
       const lead = contextFor(fullName, document);
       const known = box && !lead.company ? await CN.recallPerson({ ids, fullName }) : null;
-      const companySource = lead.company ? 'role' : known?.company ? known.source || 'role' : null;
+      const companySource = lead.company ? lead.companySource : known?.company ? known.source || 'role' : null;
       return { ...lead, company: lead.company || known?.company || null, title: lead.title || known?.title || null, companySource, ids };
     },
   });

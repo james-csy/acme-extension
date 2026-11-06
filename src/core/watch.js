@@ -122,7 +122,7 @@
   function stop() {
     clearInterval(timer);
     observers.forEach((observer) => observer.disconnect());
-    document.querySelector('connect-note-panel')?.remove();
+    CN.panel?.remove();
   }
 
   function check() {

@@ -266,7 +266,7 @@
         ], [true, true, `Conversation with ${L.fullName}`]);
         const snAdapter = (id) => CN.adapters.find((a) => a.id === id);
         const firstBox = (id, doc) => snAdapter(id).fields[0].selectors.map((sel) => doc.querySelector(sel)).find(Boolean);
-        const lead = { name: L.firstName, fullName: L.fullName, company: L.company, title: L.title };
+        const lead = { name: L.firstName, fullName: L.fullName, company: L.company, title: L.title, companySource: 'role' };
         expect('Sales Nav connect: name, company and title of the open lead', await snAdapter('sn-connect').getContext(snConnect, firstBox('sn-connect', snConnect)), lead);
         expect('Sales Nav InMail: name, company and title of the open lead', await snAdapter('sn-inmail').getContext(snInmail, firstBox('sn-inmail', snInmail)), lead);
         expect('Sales Nav InMail: message box found in the same dialog',
@@ -275,6 +275,31 @@
           { ids: [], fullName: L.fullName, title: L.title, company: L.company, source: 'role' });
         snInmail.querySelector('h1[data-anonymize="person-name"]').textContent = 'Someone Else';
         expect('Sales Nav: dialog for another person gets no company', (await snAdapter('sn-inmail').getContext(snInmail, firstBox('sn-inmail', snInmail))).company, null);
+      }
+
+      // Sales Navigator lead with no current role ("No current role listed"): the headline if it
+      // names a company, else the latest job in Experience, marked as a guess (it may have ended)
+      {
+        const snLead = (headline) => new DOMParser().parseFromString(`<h1 data-anonymize="person-name"> Gabrielle DeRussy Higgins </h1>
+          <div data-x--lead-profile-card--headline=""><span data-anonymize="headline">${headline}</span></div>
+          <div data-sn-view-name="lead-current-role"><h2>Current roles</h2><p>No current role listed</p>
+            <p>Also worked at <a data-anonymize="company-name">Informa TechTarget</a>, <span data-anonymize="company-name">TechTarget,</span></p></div>
+          <section data-sn-view-name="feature-lead-experience"><ul><li><div><a><h2 data-anonymize="company-name"> Informa TechTarget </h2></a><p>26 yrs</p></div>
+            <ul><li><h3 data-anonymize="job-title"> Senior Vice President, Revenue Operations </h3><p>Sep 2012–Jul 2026</p></li>
+              <li><h3 data-anonymize="job-title"> Vice President of Revenue Operations </h3></li></ul></li>
+            <li><div><h2 data-anonymize="company-name">United Communications Group (UCG)</h2></div></li></ul></section>
+          <section role="dialog" aria-label="Conversation with Gabrielle DeRussy Higgins">
+            <input aria-label="Subject (required)" id="compose-form-subject-ember209"><textarea id="compose-form-text-ember209" name="message"></textarea></section>`, 'text/html');
+        const snInmailAdapter = CN.adapters.find((a) => a.id === 'sn-inmail');
+        const inmailContext = async (doc) => snInmailAdapter.getContext(doc, doc.querySelector('[role="dialog"] input'));
+        const latestJob = await inmailContext(snLead('Senior Executive Leader | Trusted Partner to CEOs &amp; CROs | Strategy, Execution &amp; Talent Development'));
+        expect('Sales Nav: no current role, latest job from Experience, marked as such',
+          [latestJob.company, latestJob.title, latestJob.companySource], ['Informa TechTarget', 'Senior Vice President, Revenue Operations', 'experience']);
+        const fromHeadline = await inmailContext(snLead('Advisor @ Globex | Ex-TechTarget'));
+        expect('Sales Nav: no current role, a company in the headline comes first',
+          [fromHeadline.company, fromHeadline.companySource], ['Globex', 'headline']);
+        expect('Sales Nav: latest job remembered as a guess',
+          CN.adapters.find((a) => a.id === 'sn-connect').personOnPage(snLead('Senior Executive Leader'), '/sales/lead/ACwAA1,NAME_SEARCH')?.source, 'experience');
       }
 
       // --- End to end, with the watcher running -------------------------------

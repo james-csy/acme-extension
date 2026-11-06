@@ -126,6 +126,17 @@ chrome.runtime.onInstalled.addListener(async () => {
   chrome.tabs.reload(refreshTab).catch(() => {}); // closed meanwhile
 });
 chrome.runtime.onStartup.addListener(scheduleChecks);
+
+// After an update or a reload, LinkedIn tabs that were already open still have the old copy, which
+// the browser cuts off, so it shuts itself down (watch.js) and nothing fills in until the page is
+// refreshed. Start the new copy in them instead.
+chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+  if (reason !== 'install' && reason !== 'update') return;
+  const files = chrome.runtime.getManifest().content_scripts[0].js;
+  for (const tab of await chrome.tabs.query(LINKEDIN_TABS)) {
+    chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files }).catch(() => {}); // discarded or still loading
+  }
+});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'update-check') checkForUpdates();
 });
